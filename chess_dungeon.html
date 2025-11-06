@@ -1,0 +1,1785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Dungeon Crawler</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        #game-container {
+            display: flex;
+            gap: 20px;
+            max-width: 1600px;
+            padding: 20px;
+        }
+
+        #game-canvas {
+            border: 3px solid #4a5568;
+            background: #2d3748;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            cursor: crosshair;
+        }
+
+        #ui-panel {
+            width: 350px;
+            background: #2d3748;
+            border: 3px solid #4a5568;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            overflow-y: auto;
+            max-height: 90vh;
+        }
+
+        .panel-section {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #4a5568;
+        }
+
+        .panel-section:last-child {
+            border-bottom: none;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #ffd700;
+            margin-bottom: 15px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        h2 {
+            font-size: 18px;
+            color: #90cdf4;
+            margin-bottom: 10px;
+        }
+
+        h3 {
+            font-size: 14px;
+            color: #a0aec0;
+            margin-bottom: 8px;
+        }
+
+        .character-info, .enemy-info {
+            background: #1a202c;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border-left: 3px solid #4299e1;
+        }
+
+        .character-info.selected {
+            border-left-color: #ffd700;
+            background: #2d3748;
+        }
+
+        .character-info.dead {
+            opacity: 0.5;
+            border-left-color: #f56565;
+        }
+
+        .hp-bar {
+            height: 8px;
+            background: #4a5568;
+            border-radius: 4px;
+            margin-top: 5px;
+            overflow: hidden;
+        }
+
+        .hp-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #48bb78, #38a169);
+            transition: width 0.3s;
+        }
+
+        .hp-bar-fill.low {
+            background: linear-gradient(90deg, #f56565, #e53e3e);
+        }
+
+        button {
+            background: #4299e1;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #4a5568;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .message-log {
+            background: #1a202c;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .message {
+            margin-bottom: 5px;
+            padding: 2px 5px;
+        }
+
+        .message.important {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        .message.damage {
+            color: #f56565;
+        }
+
+        .message.heal {
+            color: #48bb78;
+        }
+
+        .sprite-legend {
+            background: #1a202c;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 20px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 10px;
+        }
+
+        .legend-sprite {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #2d3748;
+            border-radius: 3px;
+            font-size: 18px;
+        }
+
+        .legend-text {
+            font-size: 12px;
+            color: #cbd5e0;
+        }
+
+        #level-editor {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            z-index: 1000;
+            overflow: auto;
+        }
+
+        #level-editor.active {
+            display: block;
+        }
+
+        .editor-panel {
+            background: #2d3748;
+            border: 3px solid #4a5568;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+
+        .editor-tools {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .tool-button {
+            padding: 15px;
+            font-size: 24px;
+            background: #1a202c;
+            border: 2px solid #4a5568;
+        }
+
+        .tool-button.active {
+            border-color: #ffd700;
+            background: #2d3748;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        .key-indicator {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #4a5568;
+            border-radius: 3px;
+            font-size: 11px;
+            margin-left: 5px;
+        }
+
+        .stat-line {
+            font-size: 11px;
+            color: #a0aec0;
+            margin-top: 3px;
+        }
+
+        .portal-indicator {
+            position: absolute;
+            background: rgba(147, 51, 234, 0.3);
+            border: 2px solid #9333ea;
+            pointer-events: none;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #2d3748;
+            border: 3px solid #ffd700;
+            border-radius: 10px;
+            padding: 30px;
+            z-index: 2000;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+        }
+
+        .modal h2 {
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas" width="1000" height="800"></canvas>
+
+        <div id="ui-panel">
+            <div class="panel-section">
+                <h1>⚔️ Chess Dungeon</h1>
+                <div id="game-status">
+                    <div class="stat-line">Level: <span id="dungeon-level">1</span></div>
+                    <div class="stat-line">Turn: <span id="turn-number">1</span></div>
+                    <div class="stat-line">Phase: <span id="turn-phase">Player Turn</span></div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>🎮 Controls</h2>
+                <div class="controls">
+                    <button id="end-turn-btn" onclick="game.endPlayerTurn()">End Turn <span class="key-indicator">SPACE</span></button>
+                    <button onclick="game.showLevelEditor()">Level Editor <span class="key-indicator">E</span></button>
+                    <button onclick="game.restart()">Restart <span class="key-indicator">R</span></button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h2>👥 Party</h2>
+                <div id="party-list"></div>
+            </div>
+
+            <div class="panel-section">
+                <h2>👹 Enemies</h2>
+                <div id="enemy-list"></div>
+            </div>
+
+            <div class="panel-section">
+                <h2>📜 Messages</h2>
+                <div class="message-log" id="message-log"></div>
+            </div>
+
+            <div class="panel-section">
+                <h2>🎨 Sprite Legend</h2>
+                <div class="sprite-legend" id="sprite-legend"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="level-editor">
+        <div class="editor-panel">
+            <h1>🛠️ Level Editor</h1>
+
+            <div class="editor-tools" id="editor-tools"></div>
+
+            <div class="controls">
+                <button onclick="game.saveLevel()">💾 Save Level</button>
+                <button onclick="game.loadLevel()">📂 Load Level</button>
+                <button onclick="game.clearLevel()">🗑️ Clear Level</button>
+                <button onclick="game.hideLevelEditor()">✅ Done</button>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <h3>Instructions:</h3>
+                <p style="font-size: 12px; color: #a0aec0; line-height: 1.6;">
+                    Click a tool, then click on the canvas to place it.<br>
+                    Right-click to remove tiles.<br>
+                    Walls block non-knight movement.<br>
+                    Place exactly one key and one locked door.<br>
+                    Place spawn points for party and enemies.
+                </p>
+            </div>
+
+            <canvas id="editor-canvas" width="1000" height="800" style="margin-top: 20px; border: 3px solid #4a5568; background: #1a202c;"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================================
+        // GAME CONSTANTS AND CONFIGURATION
+        // ============================================================================
+
+        const TILE_SIZE = 32;
+        const BOARD_WIDTH = 30;
+        const BOARD_HEIGHT = 25;
+
+        const SPRITES = {
+            // Terrain
+            FLOOR_LIGHT: '⬜',
+            FLOOR_DARK: '⬛',
+            WALL: '🧱',
+            DOOR: '🚪',
+            LOCKED_DOOR: '🔒',
+
+            // Items
+            KEY: '🔑',
+            LOOT: '💰',
+            POWERUP: '💎',
+            PORTAL: '🌀',
+
+            // Characters (party)
+            WIZARD: '🧙',
+            WARRIOR: '⚔️',
+            THIEF: '🗡️',
+            HEALER: '✨',
+            ASSASSIN: '🥷',
+            PALADIN: '🛡️',
+
+            // Enemies
+            GOBLIN: '👺',
+            SPIDER: '🕷️',
+            BOSS: '👹',
+
+            // UI
+            FOG: '🌫️',
+            SPAWN: '📍'
+        };
+
+        const TILE_TYPES = {
+            FLOOR: 0,
+            WALL: 1,
+            DOOR: 2,
+            LOCKED_DOOR: 3,
+            LOOT: 4,
+            POWERUP: 5,
+            KEY: 6
+        };
+
+        // ============================================================================
+        // CHESS MOVEMENT LOGIC
+        // ============================================================================
+
+        class ChessMove {
+            static getKnightMoves(x, y) {
+                const moves = [];
+                const offsets = [
+                    [2, 1], [2, -1], [-2, 1], [-2, -1],
+                    [1, 2], [1, -2], [-1, 2], [-1, -2]
+                ];
+                for (const [dx, dy] of offsets) {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                        moves.push([nx, ny]);
+                    }
+                }
+                return moves;
+            }
+
+            static getRookMoves(x, y, obstacles = new Set()) {
+                const moves = [];
+                const directions = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+
+                for (const [dx, dy] of directions) {
+                    let steps = 1;
+                    while (true) {
+                        const nx = x + dx * steps;
+                        const ny = y + dy * steps;
+
+                        if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) break;
+
+                        const key = `${nx},${ny}`;
+                        if (obstacles.has(key)) break;
+
+                        moves.push([nx, ny]);
+                        steps++;
+                    }
+                }
+                return moves;
+            }
+
+            static getBishopMoves(x, y, obstacles = new Set()) {
+                const moves = [];
+                const directions = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+                for (const [dx, dy] of directions) {
+                    let steps = 1;
+                    while (true) {
+                        const nx = x + dx * steps;
+                        const ny = y + dy * steps;
+
+                        if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) break;
+
+                        const key = `${nx},${ny}`;
+                        if (obstacles.has(key)) break;
+
+                        moves.push([nx, ny]);
+                        steps++;
+                    }
+                }
+                return moves;
+            }
+
+            static getQueenMoves(x, y, obstacles = new Set()) {
+                return [
+                    ...this.getRookMoves(x, y, obstacles),
+                    ...this.getBishopMoves(x, y, obstacles)
+                ];
+            }
+
+            static getKingMoves(x, y, obstacles = new Set()) {
+                const moves = [];
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx, ny = y + dy;
+                        if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                            const key = `${nx},${ny}`;
+                            if (!obstacles.has(key)) {
+                                moves.push([nx, ny]);
+                            }
+                        }
+                    }
+                }
+                return moves;
+            }
+
+            static getPawnMoves(x, y, obstacles = new Set()) {
+                const moves = [];
+                const attacks = [];
+
+                // Forward movement
+                if (y > 0) {
+                    const key = `${x},${y-1}`;
+                    if (!obstacles.has(key)) {
+                        moves.push([x, y - 1]);
+                    }
+                }
+
+                // Diagonal attacks
+                if (y > 0) {
+                    if (x > 0) attacks.push([x - 1, y - 1]);
+                    if (x < BOARD_WIDTH - 1) attacks.push([x + 1, y - 1]);
+                }
+
+                return { moves, attacks };
+            }
+
+            static getMoves(pieceType, x, y, obstacles = new Set()) {
+                switch (pieceType) {
+                    case 'knight': return this.getKnightMoves(x, y);
+                    case 'rook': return this.getRookMoves(x, y, obstacles);
+                    case 'bishop': return this.getBishopMoves(x, y, obstacles);
+                    case 'queen': return this.getQueenMoves(x, y, obstacles);
+                    case 'king': return this.getKingMoves(x, y, obstacles);
+                    case 'pawn': return this.getPawnMoves(x, y, obstacles);
+                    default: return [];
+                }
+            }
+        }
+
+        // ============================================================================
+        // CHARACTER CLASS
+        // ============================================================================
+
+        class Character {
+            constructor(name, charClass, pieceType, sprite, x, y) {
+                this.name = name;
+                this.charClass = charClass;
+                this.pieceType = pieceType;
+                this.sprite = sprite;
+                this.x = x;
+                this.y = y;
+
+                this.level = 1;
+                this.xp = 0;
+                this.xpToNext = 100;
+
+                this.maxHp = 100;
+                this.hp = 100;
+                this.attack = 10;
+                this.defense = 5;
+                this.range = 1;
+                this.attackType = 'melee';
+                this.visibilityRange = 5;
+
+                this.isAlive = true;
+                this.hasPortalAbility = false;
+                this.portalStart = null;
+                this.portalEnd = null;
+
+                this.applyClassStats();
+            }
+
+            applyClassStats() {
+                const stats = {
+                    wizard: { hp: 80, attack: 25, defense: 3, type: 'magic', range: 5, visibility: 7 },
+                    warrior: { hp: 150, attack: 20, defense: 15, type: 'melee', range: 1, visibility: 4 },
+                    thief: { hp: 90, attack: 15, defense: 8, type: 'melee', range: 1, visibility: 6 },
+                    healer: { hp: 100, attack: 15, defense: 5, type: 'magic', range: 4, visibility: 6 },
+                    assassin: { hp: 60, attack: 25, defense: 3, type: 'melee', range: 1, visibility: 8 },
+                    paladin: { hp: 130, attack: 15, defense: 12, type: 'melee', range: 2, visibility: 5 }
+                };
+
+                if (stats[this.charClass]) {
+                    const s = stats[this.charClass];
+                    this.maxHp = s.hp;
+                    this.hp = s.hp;
+                    this.attack = s.attack;
+                    this.defense = s.defense;
+                    this.attackType = s.type;
+                    this.range = s.range;
+                    this.visibilityRange = s.visibility;
+                }
+            }
+
+            getValidMoves(obstacles) {
+                const result = ChessMove.getMoves(this.pieceType, this.x, this.y, obstacles);
+
+                if (this.pieceType === 'pawn') {
+                    return result.moves || [];
+                }
+                return result || [];
+            }
+
+            getAttackRange() {
+                if (this.attackType === 'melee') {
+                    return this.getValidMoves(new Set());
+                } else {
+                    const range = [];
+                    for (let dx = -this.range; dx <= this.range; dx++) {
+                        for (let dy = -this.range; dy <= this.range; dy++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = this.x + dx;
+                            const ny = this.y + dy;
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                if (Math.abs(dx) + Math.abs(dy) <= this.range) {
+                                    range.push([nx, ny]);
+                                }
+                            }
+                        }
+                    }
+                    return range;
+                }
+            }
+
+            calculateDamage() {
+                const base = this.attack;
+                const variance = 0.8 + Math.random() * 0.4;
+                const levelScale = 1 + (this.level - 1) * 0.2;
+                return Math.floor(base * variance * levelScale);
+            }
+
+            takeDamage(damage) {
+                const actual = Math.max(1, damage - this.defense);
+                this.hp -= actual;
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    this.isAlive = false;
+                }
+                return actual;
+            }
+
+            gainXp(amount) {
+                this.xp += amount;
+                let leveled = false;
+                while (this.xp >= this.xpToNext) {
+                    this.xp -= this.xpToNext;
+                    this.level++;
+                    this.xpToNext = Math.floor(this.xpToNext * 1.5);
+                    this.levelUp();
+                    leveled = true;
+                }
+                return leveled;
+            }
+
+            levelUp() {
+                const hpGain = 10 + Math.floor(Math.random() * 5);
+                this.maxHp += hpGain;
+                this.hp = this.maxHp;
+                this.attack += Math.floor(Math.random() * 3) + 2;
+                this.defense += Math.floor(Math.random() * 2) + 1;
+            }
+        }
+
+        // ============================================================================
+        // ENEMY CLASS
+        // ============================================================================
+
+        class Enemy extends Character {
+            constructor(name, enemyType, pieceType, sprite, x, y, level = 1) {
+                super(name, enemyType, pieceType, sprite, x, y);
+                this.enemyType = enemyType;
+                this.level = level;
+                this.xpValue = 30;
+                this.applyEnemyStats();
+                this.scaleToLevel();
+            }
+
+            applyEnemyStats() {
+                const stats = {
+                    goblin: { hp: 60, attack: 12, defense: 4, xp: 30, visibility: 4 },
+                    spider: { hp: 40, attack: 8, defense: 2, xp: 25, visibility: 5 },
+                    boss: { hp: 300, attack: 30, defense: 15, xp: 500, visibility: 6 }
+                };
+
+                if (stats[this.enemyType]) {
+                    const s = stats[this.enemyType];
+                    this.maxHp = s.hp;
+                    this.hp = s.hp;
+                    this.attack = s.attack;
+                    this.defense = s.defense;
+                    this.xpValue = s.xp;
+                    this.visibilityRange = s.visibility;
+                }
+            }
+
+            scaleToLevel() {
+                const scale = 1 + (this.level - 1) * 0.3;
+                this.maxHp = Math.floor(this.maxHp * scale);
+                this.hp = this.maxHp;
+                this.attack = Math.floor(this.attack * scale);
+                this.defense = Math.floor(this.defense * scale);
+                this.xpValue = Math.floor(this.xpValue * scale);
+            }
+
+            chooseAction(party, obstacles) {
+                const livingParty = party.filter(c => c.isAlive);
+                if (livingParty.length === 0) return null;
+
+                // Find closest party member
+                let closest = null;
+                let minDist = Infinity;
+
+                for (const char of livingParty) {
+                    const dist = Math.abs(this.x - char.x) + Math.abs(this.y - char.y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = char;
+                    }
+                }
+
+                if (!closest) return null;
+
+                // Check if in attack range
+                const attackRange = this.getAttackRange();
+                for (const [ax, ay] of attackRange) {
+                    if (ax === closest.x && ay === closest.y) {
+                        return { type: 'attack', target: closest };
+                    }
+                }
+
+                // Try to move closer
+                const validMoves = this.getValidMoves(obstacles);
+                let bestMove = null;
+                let bestDist = minDist;
+
+                for (const [mx, my] of validMoves) {
+                    const dist = Math.abs(mx - closest.x) + Math.abs(my - closest.y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestMove = [mx, my];
+                    }
+                }
+
+                if (bestMove) {
+                    return { type: 'move', x: bestMove[0], y: bestMove[1] };
+                }
+
+                return null;
+            }
+        }
+
+        // ============================================================================
+        // GAME CLASS
+        // ============================================================================
+
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('game-canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.editorCanvas = document.getElementById('editor-canvas');
+                this.editorCtx = this.editorCanvas.getContext('2d');
+
+                this.board = [];
+                this.party = [];
+                this.enemies = [];
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+
+                this.playerTurn = true;
+                this.turnNumber = 1;
+                this.dungeonLevel = 1;
+                this.messages = [];
+
+                this.fogOfWar = [];
+                this.exploredTiles = new Set();
+
+                this.hasKey = false;
+                this.keyPosition = null;
+                this.lockedDoorPosition = null;
+
+                this.editorMode = false;
+                this.editorTool = TILE_TYPES.WALL;
+
+                this.cameraX = 0;
+                this.cameraY = 0;
+
+                this.initBoard();
+                this.initParty();
+                this.generateDungeon();
+                this.initEnemies();
+                this.updateFogOfWar();
+                this.setupEventListeners();
+                this.updateUI();
+                this.initSpriteLegend();
+                this.gameLoop();
+            }
+
+            initBoard() {
+                this.board = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    const row = [];
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        row.push({
+                            type: TILE_TYPES.FLOOR,
+                            occupied: null
+                        });
+                    }
+                    this.board.push(row);
+                }
+
+                // Initialize fog of war
+                this.fogOfWar = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    this.fogOfWar.push(new Array(BOARD_WIDTH).fill(true));
+                }
+            }
+
+            initParty() {
+                this.party = [
+                    new Character('Gandor', 'wizard', 'bishop', SPRITES.WIZARD, 2, 2),
+                    new Character('Brutus', 'warrior', 'rook', SPRITES.WARRIOR, 3, 2),
+                    new Character('Swift', 'thief', 'knight', SPRITES.THIEF, 2, 3),
+                    new Character('Aria', 'healer', 'queen', SPRITES.HEALER, 3, 3),
+                    new Character('Shadow', 'assassin', 'pawn', SPRITES.ASSASSIN, 4, 2),
+                    new Character('Valor', 'paladin', 'king', SPRITES.PALADIN, 4, 3)
+                ];
+
+                // Give wizard portal ability
+                this.party[0].hasPortalAbility = true;
+            }
+
+            generateDungeon() {
+                // Simple room-based dungeon
+                this.initBoard();
+
+                // Add walls around edges
+                for (let x = 0; x < BOARD_WIDTH; x++) {
+                    this.board[0][x].type = TILE_TYPES.WALL;
+                    this.board[BOARD_HEIGHT - 1][x].type = TILE_TYPES.WALL;
+                }
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    this.board[y][0].type = TILE_TYPES.WALL;
+                    this.board[y][BOARD_WIDTH - 1].type = TILE_TYPES.WALL;
+                }
+
+                // Create rooms
+                const rooms = [
+                    { x: 5, y: 5, w: 8, h: 6 },
+                    { x: 15, y: 3, w: 10, h: 8 },
+                    { x: 8, y: 14, w: 7, h: 7 },
+                    { x: 18, y: 15, w: 9, h: 7 }
+                ];
+
+                // Add some internal walls
+                for (let y = 5; y < 20; y++) {
+                    if (y !== 10) {
+                        this.board[y][12].type = TILE_TYPES.WALL;
+                    }
+                }
+
+                // Add locked door
+                this.lockedDoorPosition = { x: 12, y: 10 };
+                this.board[10][12].type = TILE_TYPES.LOCKED_DOOR;
+
+                // Add key
+                this.keyPosition = { x: 20, y: 6 };
+                this.board[6][20].type = TILE_TYPES.KEY;
+
+                // Add some loot
+                this.board[16][10].type = TILE_TYPES.LOOT;
+                this.board[19][19].type = TILE_TYPES.POWERUP;
+                this.board[22][5].type = TILE_TYPES.LOOT;
+            }
+
+            initEnemies() {
+                const spawns = [
+                    { x: 18, y: 6, type: 'goblin', piece: 'knight' },
+                    { x: 22, y: 8, type: 'goblin', piece: 'rook' },
+                    { x: 11, y: 16, type: 'spider', piece: 'knight' },
+                    { x: 20, y: 18, type: 'spider', piece: 'bishop' },
+                    { x: 25, y: 20, type: 'boss', piece: 'queen' }
+                ];
+
+                this.enemies = [];
+                for (const spawn of spawns) {
+                    const enemy = new Enemy(
+                        `${spawn.type}_${this.enemies.length}`,
+                        spawn.type,
+                        spawn.piece,
+                        spawn.type === 'boss' ? SPRITES.BOSS : (spawn.type === 'goblin' ? SPRITES.GOBLIN : SPRITES.SPIDER),
+                        spawn.x,
+                        spawn.y,
+                        this.dungeonLevel
+                    );
+                    this.enemies.push(enemy);
+                }
+            }
+
+            setupEventListeners() {
+                this.canvas.addEventListener('click', (e) => this.handleClick(e));
+                this.canvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.handleRightClick(e);
+                });
+
+                this.editorCanvas.addEventListener('click', (e) => this.handleEditorClick(e));
+                this.editorCanvas.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    this.handleEditorRightClick(e);
+                });
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === ' ' || e.key === 'Spacebar') {
+                        e.preventDefault();
+                        this.endPlayerTurn();
+                    } else if (e.key === 'e' || e.key === 'E') {
+                        this.showLevelEditor();
+                    } else if (e.key === 'r' || e.key === 'R') {
+                        this.restart();
+                    } else if (e.key >= '1' && e.key <= '6') {
+                        const idx = parseInt(e.key) - 1;
+                        if (idx < this.party.length && this.party[idx].isAlive) {
+                            this.selectCharacter(this.party[idx]);
+                        }
+                    }
+                });
+            }
+
+            getTileCoords(e, canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const x = Math.floor((e.clientX - rect.left) / TILE_SIZE);
+                const y = Math.floor((e.clientY - rect.top) / TILE_SIZE);
+                return { x, y };
+            }
+
+            handleClick(e) {
+                if (!this.playerTurn) return;
+
+                const { x, y } = this.getTileCoords(e, this.canvas);
+                if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+
+                // Check for character selection
+                const char = this.getCharacterAt(x, y);
+                if (char && this.party.includes(char) && char.isAlive) {
+                    this.selectCharacter(char);
+                    return;
+                }
+
+                if (!this.selectedChar) return;
+
+                // Portal ability
+                if (this.selectedChar.hasPortalAbility) {
+                    if (!this.selectedChar.portalStart) {
+                        this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
+                        this.addMessage(`${this.selectedChar.name} set portal start!`, 'important');
+                        return;
+                    } else if (!this.selectedChar.portalEnd) {
+                        // Check if destination is valid
+                        const validMoves = this.selectedChar.getValidMoves(this.getObstacles());
+                        const isValid = validMoves.some(([mx, my]) => mx === x && my === y);
+
+                        if (isValid) {
+                            this.selectedChar.portalEnd = { x, y };
+                            this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
+                            return;
+                        } else {
+                            this.addMessage('Invalid portal destination!');
+                            return;
+                        }
+                    }
+                }
+
+                // Check for valid move
+                const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                if (isValidMove) {
+                    this.moveCharacter(this.selectedChar, x, y);
+                    return;
+                }
+
+                // Check for attack
+                const isValidAttack = this.validAttacks.some(([ax, ay]) => ax === x && ay === y);
+                if (isValidAttack) {
+                    const target = this.getEnemyAt(x, y);
+                    if (target) {
+                        this.attackEnemy(this.selectedChar, target);
+                        return;
+                    }
+                }
+
+                // Check for ally swap
+                const ally = this.getCharacterAt(x, y);
+                if (ally && this.party.includes(ally) && ally !== this.selectedChar && ally.isAlive) {
+                    this.swapAbilities(this.selectedChar, ally);
+                }
+            }
+
+            handleRightClick(e) {
+                // Use portal if available
+                if (!this.playerTurn) return;
+
+                const { x, y } = this.getTileCoords(e, this.canvas);
+
+                for (const char of this.party) {
+                    if (char.hasPortalAbility && char.portalStart && char.portalEnd) {
+                        // Check if clicking on portal start
+                        if (this.selectedChar &&
+                            x === char.portalEnd.x && y === char.portalEnd.y) {
+                            // Teleport selected character through portal
+                            const oldX = this.selectedChar.x;
+                            const oldY = this.selectedChar.y;
+                            this.selectedChar.x = char.portalEnd.x;
+                            this.selectedChar.y = char.portalEnd.y;
+                            this.addMessage(`${this.selectedChar.name} used the portal!`, 'important');
+                            this.updateFogOfWar();
+                            this.selectedChar = null;
+                            this.validMoves = [];
+                            this.validAttacks = [];
+                            return;
+                        }
+                    }
+                }
+            }
+
+            selectCharacter(char) {
+                this.selectedChar = char;
+                const obstacles = this.getObstacles();
+                const moves = char.getValidMoves(obstacles);
+                this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
+
+                const attackRange = char.getAttackRange();
+                this.validAttacks = attackRange.filter(([x, y]) => {
+                    const enemy = this.getEnemyAt(x, y);
+                    return enemy !== null;
+                });
+
+                this.addMessage(`Selected ${char.name} (${char.pieceType})`);
+                this.updateUI();
+            }
+
+            moveCharacter(char, x, y) {
+                char.x = x;
+                char.y = y;
+
+                // Check for pickups
+                const tile = this.board[y][x];
+                if (tile.type === TILE_TYPES.KEY) {
+                    this.hasKey = true;
+                    tile.type = TILE_TYPES.FLOOR;
+                    this.addMessage(`${char.name} found the key! 🔑`, 'important');
+                } else if (tile.type === TILE_TYPES.LOOT) {
+                    tile.type = TILE_TYPES.FLOOR;
+                    this.addMessage(`${char.name} found loot! 💰`);
+                } else if (tile.type === TILE_TYPES.POWERUP) {
+                    tile.type = TILE_TYPES.FLOOR;
+                    char.attack += 2;
+                    this.addMessage(`${char.name} powered up! +2 ATK 💎`);
+                }
+
+                // Try to unlock door
+                if (this.hasKey && this.lockedDoorPosition) {
+                    const doorDist = Math.abs(x - this.lockedDoorPosition.x) + Math.abs(y - this.lockedDoorPosition.y);
+                    if (doorDist <= 1) {
+                        this.board[this.lockedDoorPosition.y][this.lockedDoorPosition.x].type = TILE_TYPES.DOOR;
+                        this.addMessage('Locked door opened!', 'important');
+                        this.lockedDoorPosition = null;
+                    }
+                }
+
+                this.updateFogOfWar();
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.updateUI();
+            }
+
+            attackEnemy(attacker, target) {
+                const damage = attacker.calculateDamage();
+                const actualDamage = target.takeDamage(damage);
+
+                this.addMessage(`${attacker.name} attacks ${target.name} for ${actualDamage} dmg!`, 'damage');
+
+                if (!target.isAlive) {
+                    this.addMessage(`${target.name} defeated!`, 'important');
+                    const xp = target.xpValue;
+                    const leveled = attacker.gainXp(xp);
+                    this.addMessage(`${attacker.name} gained ${xp} XP!`);
+                    if (leveled) {
+                        this.addMessage(`${attacker.name} leveled up to ${attacker.level}!`, 'important');
+                    }
+
+                    // Remove enemy
+                    this.enemies = this.enemies.filter(e => e !== target);
+                }
+
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.updateUI();
+            }
+
+            swapAbilities(char1, char2) {
+                const temp = char1.pieceType;
+                char1.pieceType = char2.pieceType;
+                char2.pieceType = temp;
+
+                this.addMessage(`${char1.name} ↔ ${char2.name} swapped movement types!`, 'important');
+                this.selectCharacter(char1);
+            }
+
+            getObstacles() {
+                const obstacles = new Set();
+
+                // Add walls (but not for knights)
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        const tile = this.board[y][x];
+                        if (tile.type === TILE_TYPES.WALL ||
+                            tile.type === TILE_TYPES.LOCKED_DOOR) {
+                            if (!this.selectedChar || this.selectedChar.pieceType !== 'knight') {
+                                obstacles.add(`${x},${y}`);
+                            }
+                        }
+                    }
+                }
+
+                // Add characters
+                for (const char of this.party) {
+                    if (char.isAlive && char !== this.selectedChar) {
+                        obstacles.add(`${char.x},${char.y}`);
+                    }
+                }
+
+                // Add enemies
+                for (const enemy of this.enemies) {
+                    if (enemy.isAlive) {
+                        obstacles.add(`${enemy.x},${enemy.y}`);
+                    }
+                }
+
+                return obstacles;
+            }
+
+            isOccupied(x, y, excludeChar = null) {
+                for (const char of this.party) {
+                    if (char !== excludeChar && char.isAlive && char.x === x && char.y === y) {
+                        return true;
+                    }
+                }
+                for (const enemy of this.enemies) {
+                    if (enemy.isAlive && enemy.x === x && enemy.y === y) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            getCharacterAt(x, y) {
+                return this.party.find(c => c.x === x && c.y === y && c.isAlive);
+            }
+
+            getEnemyAt(x, y) {
+                return this.enemies.find(e => e.x === x && e.y === y && e.isAlive);
+            }
+
+            updateFogOfWar() {
+                // Reveal tiles within visibility range of party members
+                for (const char of this.party) {
+                    if (!char.isAlive) continue;
+
+                    const vr = char.visibilityRange;
+                    for (let dy = -vr; dy <= vr; dy++) {
+                        for (let dx = -vr; dx <= vr; dx++) {
+                            const nx = char.x + dx;
+                            const ny = char.y + dy;
+
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                const dist = Math.sqrt(dx * dx + dy * dy);
+                                if (dist <= vr) {
+                                    this.fogOfWar[ny][nx] = false;
+                                    this.exploredTiles.add(`${nx},${ny}`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            endPlayerTurn() {
+                if (!this.playerTurn) return;
+
+                this.playerTurn = false;
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+
+                this.addMessage('--- Enemy Turn ---');
+
+                setTimeout(() => this.enemyTurn(), 500);
+            }
+
+            enemyTurn() {
+                const obstacles = this.getObstacles();
+
+                for (const enemy of this.enemies) {
+                    if (!enemy.isAlive) continue;
+
+                    const action = enemy.chooseAction(this.party, obstacles);
+
+                    if (action) {
+                        if (action.type === 'move') {
+                            enemy.x = action.x;
+                            enemy.y = action.y;
+                        } else if (action.type === 'attack') {
+                            const damage = enemy.calculateDamage();
+                            const actualDamage = action.target.takeDamage(damage);
+                            this.addMessage(`${enemy.name} attacks ${action.target.name} for ${actualDamage} dmg!`, 'damage');
+
+                            if (!action.target.isAlive) {
+                                this.addMessage(`${action.target.name} has fallen!`, 'damage');
+                            }
+                        }
+                    }
+                }
+
+                this.playerTurn = true;
+                this.turnNumber++;
+                this.updateFogOfWar();
+                this.addMessage(`--- Turn ${this.turnNumber} ---`);
+
+                // Check win/loss conditions
+                if (this.enemies.length === 0) {
+                    this.addMessage('🎉 VICTORY! All enemies defeated!', 'important');
+                }
+                if (!this.party.some(c => c.isAlive)) {
+                    this.addMessage('💀 DEFEAT! Party wiped out!', 'damage');
+                }
+
+                this.updateUI();
+            }
+
+            addMessage(text, type = '') {
+                this.messages.push({ text, type });
+                if (this.messages.length > 20) {
+                    this.messages.shift();
+                }
+
+                const logDiv = document.getElementById('message-log');
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${type}`;
+                msgDiv.textContent = text;
+                logDiv.appendChild(msgDiv);
+                logDiv.scrollTop = logDiv.scrollHeight;
+
+                if (logDiv.children.length > 20) {
+                    logDiv.removeChild(logDiv.firstChild);
+                }
+            }
+
+            updateUI() {
+                // Update game status
+                document.getElementById('dungeon-level').textContent = this.dungeonLevel;
+                document.getElementById('turn-number').textContent = this.turnNumber;
+                document.getElementById('turn-phase').textContent = this.playerTurn ? 'Player Turn' : 'Enemy Turn';
+                document.getElementById('turn-phase').style.color = this.playerTurn ? '#48bb78' : '#f56565';
+
+                // Update party list
+                const partyList = document.getElementById('party-list');
+                partyList.innerHTML = '';
+
+                for (let i = 0; i < this.party.length; i++) {
+                    const char = this.party[i];
+                    const div = document.createElement('div');
+                    div.className = 'character-info';
+                    if (char === this.selectedChar) div.classList.add('selected');
+                    if (!char.isAlive) div.classList.add('dead');
+
+                    const hpPercent = (char.hp / char.maxHp) * 100;
+
+                    div.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 18px;">${char.sprite} ${char.name}</span>
+                            <span class="key-indicator">${i + 1}</span>
+                        </div>
+                        <div class="stat-line">${char.charClass} | ${char.pieceType} | Lv${char.level}</div>
+                        <div class="stat-line">ATK: ${char.attack} | DEF: ${char.defense} | VIS: ${char.visibilityRange}</div>
+                        <div class="hp-bar">
+                            <div class="hp-bar-fill ${hpPercent < 30 ? 'low' : ''}" style="width: ${hpPercent}%"></div>
+                        </div>
+                        <div class="stat-line">HP: ${char.hp}/${char.maxHp} | XP: ${char.xp}/${char.xpToNext}</div>
+                        ${char.hasPortalAbility ? '<div class="stat-line" style="color: #9333ea;">🌀 Portal Ability</div>' : ''}
+                    `;
+
+                    div.onclick = () => {
+                        if (char.isAlive) this.selectCharacter(char);
+                    };
+
+                    partyList.appendChild(div);
+                }
+
+                // Update enemy list
+                const enemyList = document.getElementById('enemy-list');
+                enemyList.innerHTML = '';
+
+                const livingEnemies = this.enemies.filter(e => e.isAlive);
+
+                if (livingEnemies.length === 0) {
+                    enemyList.innerHTML = '<div style="color: #48bb78;">All enemies defeated! 🎉</div>';
+                } else {
+                    for (const enemy of livingEnemies) {
+                        const div = document.createElement('div');
+                        div.className = 'enemy-info';
+
+                        const hpPercent = (enemy.hp / enemy.maxHp) * 100;
+
+                        div.innerHTML = `
+                            <div style="font-size: 18px;">${enemy.sprite} ${enemy.name}</div>
+                            <div class="stat-line">${enemy.enemyType} | ${enemy.pieceType} | Lv${enemy.level}</div>
+                            <div class="hp-bar">
+                                <div class="hp-bar-fill" style="width: ${hpPercent}%"></div>
+                            </div>
+                            <div class="stat-line">HP: ${enemy.hp}/${enemy.maxHp}</div>
+                        `;
+
+                        enemyList.appendChild(div);
+                    }
+                }
+            }
+
+            initSpriteLegend() {
+                const legend = document.getElementById('sprite-legend');
+                const items = [
+                    { sprite: SPRITES.WIZARD, name: 'Wizard (Bishop)' },
+                    { sprite: SPRITES.WARRIOR, name: 'Warrior (Rook)' },
+                    { sprite: SPRITES.THIEF, name: 'Thief (Knight)' },
+                    { sprite: SPRITES.HEALER, name: 'Healer (Queen)' },
+                    { sprite: SPRITES.ASSASSIN, name: 'Assassin (Pawn)' },
+                    { sprite: SPRITES.PALADIN, name: 'Paladin (King)' },
+                    { sprite: SPRITES.GOBLIN, name: 'Goblin' },
+                    { sprite: SPRITES.SPIDER, name: 'Spider' },
+                    { sprite: SPRITES.BOSS, name: 'Boss' },
+                    { sprite: SPRITES.WALL, name: 'Wall' },
+                    { sprite: SPRITES.LOCKED_DOOR, name: 'Locked Door' },
+                    { sprite: SPRITES.KEY, name: 'Key' },
+                    { sprite: SPRITES.LOOT, name: 'Loot' },
+                    { sprite: SPRITES.POWERUP, name: 'Power-up' },
+                    { sprite: SPRITES.PORTAL, name: 'Portal' }
+                ];
+
+                legend.innerHTML = items.map(item => `
+                    <div class="legend-item">
+                        <div class="legend-sprite">${item.sprite}</div>
+                        <div class="legend-text">${item.name}</div>
+                    </div>
+                `).join('');
+            }
+
+            render() {
+                this.ctx.fillStyle = '#1a202c';
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Draw board
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        const tile = this.board[y][x];
+                        const px = x * TILE_SIZE;
+                        const py = y * TILE_SIZE;
+
+                        // Check if explored
+                        const explored = this.exploredTiles.has(`${x},${y}`);
+                        const visible = !this.fogOfWar[y][x];
+
+                        if (!explored) {
+                            // Completely dark
+                            this.ctx.fillStyle = '#0a0a0a';
+                            this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                            continue;
+                        }
+
+                        // Draw floor
+                        if (tile.type === TILE_TYPES.FLOOR) {
+                            this.ctx.fillStyle = (x + y) % 2 === 0 ? '#4a5568' : '#2d3748';
+                        } else {
+                            this.ctx.fillStyle = '#2d3748';
+                        }
+                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+
+                        // Draw tile
+                        let sprite = null;
+                        if (tile.type === TILE_TYPES.WALL) sprite = SPRITES.WALL;
+                        else if (tile.type === TILE_TYPES.DOOR) sprite = SPRITES.DOOR;
+                        else if (tile.type === TILE_TYPES.LOCKED_DOOR) sprite = SPRITES.LOCKED_DOOR;
+                        else if (tile.type === TILE_TYPES.KEY) sprite = SPRITES.KEY;
+                        else if (tile.type === TILE_TYPES.LOOT) sprite = SPRITES.LOOT;
+                        else if (tile.type === TILE_TYPES.POWERUP) sprite = SPRITES.POWERUP;
+
+                        if (sprite) {
+                            this.ctx.font = '24px Arial';
+                            this.ctx.textAlign = 'center';
+                            this.ctx.textBaseline = 'middle';
+                            this.ctx.fillText(sprite, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
+                        }
+
+                        // Fog overlay
+                        if (!visible) {
+                            this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                            this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        }
+                    }
+                }
+
+                // Draw valid moves
+                if (this.selectedChar) {
+                    this.ctx.fillStyle = 'rgba(66, 153, 225, 0.3)';
+                    this.ctx.strokeStyle = '#4299e1';
+                    this.ctx.lineWidth = 2;
+
+                    for (const [x, y] of this.validMoves) {
+                        const px = x * TILE_SIZE;
+                        const py = y * TILE_SIZE;
+                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                    }
+
+                    // Draw attack range
+                    this.ctx.fillStyle = 'rgba(245, 101, 101, 0.3)';
+                    this.ctx.strokeStyle = '#f56565';
+
+                    for (const [x, y] of this.validAttacks) {
+                        const px = x * TILE_SIZE;
+                        const py = y * TILE_SIZE;
+                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+
+                // Draw portal
+                for (const char of this.party) {
+                    if (char.hasPortalAbility && char.portalStart && char.portalEnd) {
+                        // Portal start
+                        const px1 = char.portalStart.x * TILE_SIZE;
+                        const py1 = char.portalStart.y * TILE_SIZE;
+                        this.ctx.font = '28px Arial';
+                        this.ctx.textAlign = 'center';
+                        this.ctx.textBaseline = 'middle';
+                        this.ctx.fillText(SPRITES.PORTAL, px1 + TILE_SIZE / 2, py1 + TILE_SIZE / 2);
+
+                        // Portal end
+                        const px2 = char.portalEnd.x * TILE_SIZE;
+                        const py2 = char.portalEnd.y * TILE_SIZE;
+                        this.ctx.fillText(SPRITES.PORTAL, px2 + TILE_SIZE / 2, py2 + TILE_SIZE / 2);
+
+                        // Connection line
+                        this.ctx.strokeStyle = '#9333ea';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.setLineDash([5, 5]);
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(px1 + TILE_SIZE / 2, py1 + TILE_SIZE / 2);
+                        this.ctx.lineTo(px2 + TILE_SIZE / 2, py2 + TILE_SIZE / 2);
+                        this.ctx.stroke();
+                        this.ctx.setLineDash([]);
+                    }
+                }
+
+                // Draw characters
+                this.ctx.font = '28px Arial';
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+
+                for (const char of this.party) {
+                    if (!char.isAlive) continue;
+
+                    const visible = !this.fogOfWar[char.y][char.x];
+                    if (!visible) continue;
+
+                    const px = char.x * TILE_SIZE + TILE_SIZE / 2;
+                    const py = char.y * TILE_SIZE + TILE_SIZE / 2;
+
+                    if (char === this.selectedChar) {
+                        this.ctx.fillStyle = 'rgba(255, 215, 0, 0.4)';
+                        this.ctx.fillRect(char.x * TILE_SIZE, char.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        this.ctx.strokeStyle = '#ffd700';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.strokeRect(char.x * TILE_SIZE, char.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+
+                    this.ctx.fillText(char.sprite, px, py);
+                }
+
+                // Draw enemies
+                for (const enemy of this.enemies) {
+                    if (!enemy.isAlive) continue;
+
+                    const visible = !this.fogOfWar[enemy.y][enemy.x];
+                    if (!visible) continue;
+
+                    const px = enemy.x * TILE_SIZE + TILE_SIZE / 2;
+                    const py = enemy.y * TILE_SIZE + TILE_SIZE / 2;
+
+                    this.ctx.fillText(enemy.sprite, px, py);
+                }
+
+                // Draw grid
+                this.ctx.strokeStyle = '#1a202c';
+                this.ctx.lineWidth = 1;
+                for (let x = 0; x <= BOARD_WIDTH; x++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(x * TILE_SIZE, 0);
+                    this.ctx.lineTo(x * TILE_SIZE, BOARD_HEIGHT * TILE_SIZE);
+                    this.ctx.stroke();
+                }
+                for (let y = 0; y <= BOARD_HEIGHT; y++) {
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(0, y * TILE_SIZE);
+                    this.ctx.lineTo(BOARD_WIDTH * TILE_SIZE, y * TILE_SIZE);
+                    this.ctx.stroke();
+                }
+            }
+
+            gameLoop() {
+                this.render();
+                requestAnimationFrame(() => this.gameLoop());
+            }
+
+            restart() {
+                this.dungeonLevel = 1;
+                this.turnNumber = 1;
+                this.playerTurn = true;
+                this.hasKey = false;
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.messages = [];
+                this.exploredTiles.clear();
+
+                document.getElementById('message-log').innerHTML = '';
+
+                this.initBoard();
+                this.initParty();
+                this.generateDungeon();
+                this.initEnemies();
+                this.updateFogOfWar();
+                this.updateUI();
+
+                this.addMessage('=== New Game Started ===', 'important');
+            }
+
+            // ========================================================================
+            // LEVEL EDITOR
+            // ========================================================================
+
+            showLevelEditor() {
+                this.editorMode = true;
+                document.getElementById('level-editor').classList.add('active');
+                this.initEditorTools();
+                this.renderEditor();
+            }
+
+            hideLevelEditor() {
+                this.editorMode = false;
+                document.getElementById('level-editor').classList.remove('active');
+            }
+
+            initEditorTools() {
+                const toolsDiv = document.getElementById('editor-tools');
+                const tools = [
+                    { type: TILE_TYPES.FLOOR, label: '⬜ Floor' },
+                    { type: TILE_TYPES.WALL, label: '🧱 Wall' },
+                    { type: TILE_TYPES.DOOR, label: '🚪 Door' },
+                    { type: TILE_TYPES.LOCKED_DOOR, label: '🔒 Locked' },
+                    { type: TILE_TYPES.KEY, label: '🔑 Key' },
+                    { type: TILE_TYPES.LOOT, label: '💰 Loot' },
+                    { type: TILE_TYPES.POWERUP, label: '💎 Power' },
+                    { type: 'party', label: '👥 Party' },
+                    { type: 'enemy', label: '👹 Enemy' }
+                ];
+
+                toolsDiv.innerHTML = tools.map(tool => `
+                    <button class="tool-button ${tool.type === this.editorTool ? 'active' : ''}"
+                            onclick="game.selectEditorTool('${tool.type}')">
+                        ${tool.label}
+                    </button>
+                `).join('');
+            }
+
+            selectEditorTool(tool) {
+                this.editorTool = tool;
+                this.initEditorTools();
+            }
+
+            handleEditorClick(e) {
+                const { x, y } = this.getTileCoords(e, this.editorCanvas);
+                if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+
+                if (this.editorTool === 'party') {
+                    // Place party spawn
+                    if (this.party.length < 6) {
+                        const char = this.party[0];
+                        char.x = x;
+                        char.y = y;
+                    }
+                } else if (this.editorTool === 'enemy') {
+                    // Place enemy spawn
+                    this.enemies.push(new Enemy(`Enemy_${this.enemies.length}`, 'goblin', 'knight', SPRITES.GOBLIN, x, y, 1));
+                } else {
+                    this.board[y][x].type = this.editorTool;
+
+                    if (this.editorTool === TILE_TYPES.KEY) {
+                        this.keyPosition = { x, y };
+                    } else if (this.editorTool === TILE_TYPES.LOCKED_DOOR) {
+                        this.lockedDoorPosition = { x, y };
+                    }
+                }
+
+                this.renderEditor();
+            }
+
+            handleEditorRightClick(e) {
+                const { x, y } = this.getTileCoords(e, this.editorCanvas);
+                if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+
+                this.board[y][x].type = TILE_TYPES.FLOOR;
+
+                // Remove characters/enemies at this position
+                this.party = this.party.filter(c => c.x !== x || c.y !== y);
+                this.enemies = this.enemies.filter(e => e.x !== x || e.y !== y);
+
+                this.renderEditor();
+            }
+
+            renderEditor() {
+                const ctx = this.editorCtx;
+                ctx.fillStyle = '#1a202c';
+                ctx.fillRect(0, 0, this.editorCanvas.width, this.editorCanvas.height);
+
+                // Draw board
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        const tile = this.board[y][x];
+                        const px = x * TILE_SIZE;
+                        const py = y * TILE_SIZE;
+
+                        // Draw floor
+                        ctx.fillStyle = (x + y) % 2 === 0 ? '#4a5568' : '#2d3748';
+                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+
+                        // Draw tile
+                        let sprite = null;
+                        if (tile.type === TILE_TYPES.WALL) sprite = SPRITES.WALL;
+                        else if (tile.type === TILE_TYPES.DOOR) sprite = SPRITES.DOOR;
+                        else if (tile.type === TILE_TYPES.LOCKED_DOOR) sprite = SPRITES.LOCKED_DOOR;
+                        else if (tile.type === TILE_TYPES.KEY) sprite = SPRITES.KEY;
+                        else if (tile.type === TILE_TYPES.LOOT) sprite = SPRITES.LOOT;
+                        else if (tile.type === TILE_TYPES.POWERUP) sprite = SPRITES.POWERUP;
+
+                        if (sprite) {
+                            ctx.font = '24px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(sprite, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
+                        }
+                    }
+                }
+
+                // Draw party
+                ctx.font = '28px Arial';
+                for (const char of this.party) {
+                    const px = char.x * TILE_SIZE + TILE_SIZE / 2;
+                    const py = char.y * TILE_SIZE + TILE_SIZE / 2;
+                    ctx.fillText(char.sprite, px, py);
+                }
+
+                // Draw enemies
+                for (const enemy of this.enemies) {
+                    const px = enemy.x * TILE_SIZE + TILE_SIZE / 2;
+                    const py = enemy.y * TILE_SIZE + TILE_SIZE / 2;
+                    ctx.fillText(enemy.sprite, px, py);
+                }
+
+                // Draw grid
+                ctx.strokeStyle = '#4a5568';
+                ctx.lineWidth = 1;
+                for (let x = 0; x <= BOARD_WIDTH; x++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x * TILE_SIZE, 0);
+                    ctx.lineTo(x * TILE_SIZE, BOARD_HEIGHT * TILE_SIZE);
+                    ctx.stroke();
+                }
+                for (let y = 0; y <= BOARD_HEIGHT; y++) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y * TILE_SIZE);
+                    ctx.lineTo(BOARD_WIDTH * TILE_SIZE, y * TILE_SIZE);
+                    ctx.stroke();
+                }
+            }
+
+            saveLevel() {
+                const data = {
+                    board: this.board,
+                    party: this.party.map(c => ({ x: c.x, y: c.y, name: c.name, charClass: c.charClass, pieceType: c.pieceType })),
+                    enemies: this.enemies.map(e => ({ x: e.x, y: e.y, type: e.enemyType, piece: e.pieceType })),
+                    keyPosition: this.keyPosition,
+                    lockedDoorPosition: this.lockedDoorPosition
+                };
+
+                const json = JSON.stringify(data);
+                const blob = new Blob([json], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dungeon_level.json';
+                a.click();
+                URL.revokeObjectURL(url);
+
+                alert('Level saved!');
+            }
+
+            loadLevel() {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = (e) => {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const data = JSON.parse(event.target.result);
+                            this.board = data.board;
+                            this.keyPosition = data.keyPosition;
+                            this.lockedDoorPosition = data.lockedDoorPosition;
+
+                            // Reconstruct party
+                            this.initParty();
+                            for (let i = 0; i < data.party.length && i < this.party.length; i++) {
+                                this.party[i].x = data.party[i].x;
+                                this.party[i].y = data.party[i].y;
+                            }
+
+                            // Reconstruct enemies
+                            this.enemies = [];
+                            for (const e of data.enemies) {
+                                this.enemies.push(new Enemy(`${e.type}_${this.enemies.length}`, e.type, e.piece,
+                                    e.type === 'boss' ? SPRITES.BOSS : (e.type === 'goblin' ? SPRITES.GOBLIN : SPRITES.SPIDER),
+                                    e.x, e.y, 1));
+                            }
+
+                            this.renderEditor();
+                            alert('Level loaded!');
+                        } catch (err) {
+                            alert('Error loading level: ' + err.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+                input.click();
+            }
+
+            clearLevel() {
+                if (confirm('Clear the entire level?')) {
+                    this.initBoard();
+                    this.party = [];
+                    this.enemies = [];
+                    this.renderEditor();
+                }
+            }
+        }
+
+        // ============================================================================
+        // START GAME
+        // ============================================================================
+
+        let game;
+        window.addEventListener('load', () => {
+            game = new Game();
+        });
+    </script>
+</body>
+</html>
