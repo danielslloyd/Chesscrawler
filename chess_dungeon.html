@@ -34,6 +34,9 @@
             background: #2d3748;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             cursor: crosshair;
+            display: block;
+            width: 960px;
+            height: 800px;
         }
 
         #ui-panel {
@@ -300,7 +303,7 @@
 </head>
 <body>
     <div id="game-container">
-        <canvas id="game-canvas" width="1000" height="800"></canvas>
+        <canvas id="game-canvas" width="960" height="800"></canvas>
 
         <div id="ui-panel">
             <div class="panel-section">
@@ -367,7 +370,7 @@
                 </p>
             </div>
 
-            <canvas id="editor-canvas" width="1000" height="800" style="margin-top: 20px; border: 3px solid #4a5568; background: #1a202c;"></canvas>
+            <canvas id="editor-canvas" width="960" height="800" style="margin-top: 20px; border: 3px solid #4a5568; background: #1a202c;"></canvas>
         </div>
     </div>
 
@@ -379,6 +382,8 @@
         const TILE_SIZE = 32;
         const BOARD_WIDTH = 30;
         const BOARD_HEIGHT = 25;
+        const CANVAS_WIDTH = BOARD_WIDTH * TILE_SIZE;  // 960
+        const CANVAS_HEIGHT = BOARD_HEIGHT * TILE_SIZE; // 800
 
         const SPRITES = {
             // Terrain
@@ -792,6 +797,8 @@
                 this.cameraX = 0;
                 this.cameraY = 0;
 
+                this.hoveredTile = null;
+
                 this.initBoard();
                 this.initParty();
                 this.generateDungeon();
@@ -910,6 +917,7 @@
                     e.preventDefault();
                     this.handleRightClick(e);
                 });
+                this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
 
                 this.editorCanvas.addEventListener('click', (e) => this.handleEditorClick(e));
                 this.editorCanvas.addEventListener('contextmenu', (e) => {
@@ -934,10 +942,24 @@
                 });
             }
 
+            handleMouseMove(e) {
+                const { x, y } = this.getTileCoords(e, this.canvas);
+                if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                    this.hoveredTile = { x, y };
+                } else {
+                    this.hoveredTile = null;
+                }
+            }
+
             getTileCoords(e, canvas) {
                 const rect = canvas.getBoundingClientRect();
-                const x = Math.floor((e.clientX - rect.left) / TILE_SIZE);
-                const y = Math.floor((e.clientY - rect.top) / TILE_SIZE);
+                // Account for CSS scaling by mapping from display coords to canvas coords
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const canvasX = (e.clientX - rect.left) * scaleX;
+                const canvasY = (e.clientY - rect.top) * scaleY;
+                const x = Math.floor(canvasX / TILE_SIZE);
+                const y = Math.floor(canvasY / TILE_SIZE);
                 return { x, y };
             }
 
@@ -1364,7 +1386,7 @@
 
             render() {
                 this.ctx.fillStyle = '#1a202c';
-                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
                 // Draw board
                 for (let y = 0; y < BOARD_HEIGHT; y++) {
@@ -1414,6 +1436,22 @@
                             this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
                         }
                     }
+                }
+
+                // Draw hovered tile highlight (DEBUG)
+                if (this.hoveredTile) {
+                    const px = this.hoveredTile.x * TILE_SIZE;
+                    const py = this.hoveredTile.y * TILE_SIZE;
+                    this.ctx.strokeStyle = '#00ff00';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+
+                    // Draw coordinates
+                    this.ctx.fillStyle = '#00ff00';
+                    this.ctx.font = 'bold 12px Arial';
+                    this.ctx.textAlign = 'left';
+                    this.ctx.textBaseline = 'top';
+                    this.ctx.fillText(`${this.hoveredTile.x},${this.hoveredTile.y}`, px + 2, py + 2);
                 }
 
                 // Draw valid moves
@@ -1638,7 +1676,7 @@
             renderEditor() {
                 const ctx = this.editorCtx;
                 ctx.fillStyle = '#1a202c';
-                ctx.fillRect(0, 0, this.editorCanvas.width, this.editorCanvas.height);
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
                 // Draw board
                 for (let y = 0; y < BOARD_HEIGHT; y++) {
