@@ -144,6 +144,45 @@
             transform: none;
         }
 
+        .action-button {
+            background: #2d3748;
+            color: white;
+            border: 2px solid #4a5568;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+            margin: 2px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+
+        .action-button:hover {
+            background: #4a5568;
+            border-color: #4299e1;
+        }
+
+        .action-button.active {
+            background: #4299e1;
+            border-color: #ffd700;
+            color: #ffd700;
+        }
+
+        .action-button:disabled {
+            background: #1a202c;
+            border-color: #2d3748;
+            color: #4a5568;
+            cursor: not-allowed;
+        }
+
+        .action-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-top: 8px;
+        }
+
         .message-log {
             background: #1a202c;
             padding: 10px;
@@ -174,32 +213,31 @@
 
         .sprite-legend {
             background: #1a202c;
-            padding: 15px;
+            padding: 8px;
             border-radius: 5px;
-            font-size: 20px;
+            font-size: 14px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
         }
 
         .legend-item {
             display: flex;
             align-items: center;
-            margin-bottom: 8px;
-            gap: 10px;
+            gap: 4px;
+            font-size: 10px;
         }
 
         .legend-sprite {
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #2d3748;
-            border-radius: 3px;
-            font-size: 18px;
+            font-size: 14px;
         }
 
         .legend-text {
-            font-size: 12px;
+            font-size: 9px;
             color: #cbd5e0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         #level-editor {
@@ -340,7 +378,7 @@
             </div>
 
             <div class="panel-section">
-                <h2>🎨 Sprite Legend</h2>
+                <h3>🎨 Legend</h3>
                 <div class="sprite-legend" id="sprite-legend"></div>
             </div>
         </div>
@@ -776,6 +814,7 @@
                 this.party = [];
                 this.enemies = [];
                 this.selectedChar = null;
+                this.actionMode = 'move'; // move, ranged, melee, capture, special
                 this.validMoves = [];
                 this.validAttacks = [];
 
@@ -932,12 +971,24 @@
                     } else if (e.key === 'e' || e.key === 'E') {
                         this.showLevelEditor();
                     } else if (e.key === 'r' || e.key === 'R') {
-                        this.restart();
+                        if (!this.editorMode) {
+                            this.restart();
+                        }
                     } else if (e.key >= '1' && e.key <= '6') {
                         const idx = parseInt(e.key) - 1;
                         if (idx < this.party.length && this.party[idx].isAlive) {
                             this.selectCharacter(this.party[idx]);
                         }
+                    } else if (e.key === 'm' || e.key === 'M') {
+                        this.setActionMode('move');
+                    } else if (e.key === 'a' || e.key === 'A') {
+                        this.setActionMode('melee');
+                    } else if (e.key === 'g' || e.key === 'G') {
+                        this.setActionMode('ranged');
+                    } else if (e.key === 'c' || e.key === 'C') {
+                        this.setActionMode('capture');
+                    } else if (e.key === 's' || e.key === 'S') {
+                        this.setActionMode('special');
                     }
                 });
             }
@@ -978,91 +1029,223 @@
 
                 if (!this.selectedChar) return;
 
-                // Portal ability
-                if (this.selectedChar.hasPortalAbility) {
-                    if (!this.selectedChar.portalStart) {
-                        this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
-                        this.addMessage(`${this.selectedChar.name} set portal start!`, 'important');
-                        return;
-                    } else if (!this.selectedChar.portalEnd) {
-                        // Check if destination is valid
-                        const validMoves = this.selectedChar.getValidMoves(this.getObstacles());
-                        const isValid = validMoves.some(([mx, my]) => mx === x && my === y);
-
-                        if (isValid) {
-                            this.selectedChar.portalEnd = { x, y };
-                            this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
-                            return;
-                        } else {
-                            this.addMessage('Invalid portal destination!');
-                            return;
+                // Execute action based on mode
+                if (this.actionMode === 'move') {
+                    const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                    if (isValidMove) {
+                        this.moveCharacter(this.selectedChar, x, y);
+                    }
+                } else if (this.actionMode === 'melee' || this.actionMode === 'ranged') {
+                    const isValidAttack = this.validAttacks.some(([ax, ay]) => ax === x && ay === y);
+                    if (isValidAttack) {
+                        const target = this.getEnemyAt(x, y);
+                        if (target) {
+                            this.attackEnemy(this.selectedChar, target, this.actionMode);
                         }
                     }
-                }
-
-                // Check for valid move
-                const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
-                if (isValidMove) {
-                    this.moveCharacter(this.selectedChar, x, y);
-                    return;
-                }
-
-                // Check for attack
-                const isValidAttack = this.validAttacks.some(([ax, ay]) => ax === x && ay === y);
-                if (isValidAttack) {
-                    const target = this.getEnemyAt(x, y);
-                    if (target) {
-                        this.attackEnemy(this.selectedChar, target);
-                        return;
+                } else if (this.actionMode === 'capture') {
+                    const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                    if (isValidMove) {
+                        const ally = this.getCharacterAt(x, y);
+                        if (ally && ally !== this.selectedChar) {
+                            this.swapPositions(this.selectedChar, ally);
+                        }
                     }
-                }
-
-                // Check for ally swap
-                const ally = this.getCharacterAt(x, y);
-                if (ally && this.party.includes(ally) && ally !== this.selectedChar && ally.isAlive) {
-                    this.swapAbilities(this.selectedChar, ally);
+                } else if (this.actionMode === 'special') {
+                    if (this.selectedChar.hasPortalAbility) {
+                        if (!this.selectedChar.portalStart) {
+                            this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
+                            this.addMessage(`${this.selectedChar.name} set portal start!`, 'important');
+                            return;
+                        } else if (!this.selectedChar.portalEnd) {
+                            const isValid = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                            if (isValid) {
+                                this.selectedChar.portalEnd = { x, y };
+                                this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
+                                this.selectedChar = null;
+                                this.validMoves = [];
+                                this.validAttacks = [];
+                                this.updateUI();
+                                return;
+                            } else {
+                                this.addMessage('Invalid portal destination!');
+                                return;
+                            }
+                        }
+                    }
                 }
             }
 
             handleRightClick(e) {
-                // Use portal if available
+                // Right-click to deselect
                 if (!this.playerTurn) return;
 
-                const { x, y } = this.getTileCoords(e, this.canvas);
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.updateUI();
+            }
 
+            setActionMode(mode) {
+                this.actionMode = mode;
+                if (this.selectedChar) {
+                    this.updateValidActionsForMode();
+                }
+                this.updateUI();
+
+                const modeNames = {
+                    move: 'Movement',
+                    melee: 'Melee Attack',
+                    ranged: 'Ranged Attack',
+                    capture: 'Capture (Swap)',
+                    special: 'Special Ability'
+                };
+                this.addMessage(`Action mode: ${modeNames[mode]}`);
+            }
+
+            getPortalLink(x, y) {
+                // Check if standing on a portal and return the other end
                 for (const char of this.party) {
                     if (char.hasPortalAbility && char.portalStart && char.portalEnd) {
-                        // Check if clicking on portal start
-                        if (this.selectedChar &&
-                            x === char.portalEnd.x && y === char.portalEnd.y) {
-                            // Teleport selected character through portal
-                            const oldX = this.selectedChar.x;
-                            const oldY = this.selectedChar.y;
-                            this.selectedChar.x = char.portalEnd.x;
-                            this.selectedChar.y = char.portalEnd.y;
-                            this.addMessage(`${this.selectedChar.name} used the portal!`, 'important');
-                            this.updateFogOfWar();
-                            this.selectedChar = null;
-                            this.validMoves = [];
-                            this.validAttacks = [];
-                            return;
+                        if (x === char.portalStart.x && y === char.portalStart.y) {
+                            return char.portalEnd;
                         }
+                        if (x === char.portalEnd.x && y === char.portalEnd.y) {
+                            return char.portalStart;
+                        }
+                    }
+                }
+                return null;
+            }
+
+            getMovesWithPortal(baseX, baseY, obstacles) {
+                const moves = [];
+                const movesFromBase = ChessMove.getMoves(this.selectedChar.pieceType, baseX, baseY, obstacles);
+                const baseMoves = movesFromBase.moves || movesFromBase || [];
+
+                // Add base moves
+                for (const move of baseMoves) {
+                    moves.push(move);
+                }
+
+                // Check if on a portal
+                const portalLink = this.getPortalLink(baseX, baseY);
+                if (portalLink) {
+                    // Add moves from the other portal end
+                    const portalMoves = ChessMove.getMoves(this.selectedChar.pieceType, portalLink.x, portalLink.y, obstacles);
+                    const portalBaseMoves = portalMoves.moves || portalMoves || [];
+                    for (const move of portalBaseMoves) {
+                        // Check if not already in the list
+                        if (!moves.some(([mx, my]) => mx === move[0] && my === move[1])) {
+                            moves.push(move);
+                        }
+                    }
+                }
+
+                return moves;
+            }
+
+            getAttackRangeWithPortal(char) {
+                const attacks = [];
+
+                // Get base attack range
+                if (char.attackType === 'melee') {
+                    const baseMoves = char.getValidMoves(new Set());
+                    attacks.push(...baseMoves);
+                } else {
+                    for (let dx = -char.range; dx <= char.range; dx++) {
+                        for (let dy = -char.range; dy <= char.range; dy++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = char.x + dx;
+                            const ny = char.y + dy;
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                if (Math.abs(dx) + Math.abs(dy) <= char.range) {
+                                    attacks.push([nx, ny]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check if on a portal
+                const portalLink = this.getPortalLink(char.x, char.y);
+                if (portalLink) {
+                    // Add attack range from the other portal end
+                    if (char.attackType === 'melee') {
+                        const portalMoves = ChessMove.getMoves(char.pieceType, portalLink.x, portalLink.y, new Set());
+                        const portalBaseMoves = portalMoves.moves || portalMoves || [];
+                        for (const move of portalBaseMoves) {
+                            if (!attacks.some(([mx, my]) => mx === move[0] && my === move[1])) {
+                                attacks.push(move);
+                            }
+                        }
+                    } else {
+                        for (let dx = -char.range; dx <= char.range; dx++) {
+                            for (let dy = -char.range; dy <= char.range; dy++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const nx = portalLink.x + dx;
+                                const ny = portalLink.y + dy;
+                                if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                    if (Math.abs(dx) + Math.abs(dy) <= char.range) {
+                                        if (!attacks.some(([mx, my]) => mx === nx && my === ny)) {
+                                            attacks.push([nx, ny]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return attacks;
+            }
+
+            updateValidActionsForMode() {
+                if (!this.selectedChar) return;
+
+                const obstacles = this.getObstacles();
+                const char = this.selectedChar;
+
+                this.validMoves = [];
+                this.validAttacks = [];
+
+                if (this.actionMode === 'move') {
+                    const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
+                    this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
+                } else if (this.actionMode === 'melee') {
+                    // Melee attack uses movement range
+                    const attackRange = this.getMovesWithPortal(char.x, char.y, obstacles);
+                    this.validAttacks = attackRange.filter(([x, y]) => {
+                        const enemy = this.getEnemyAt(x, y);
+                        return enemy !== null;
+                    });
+                } else if (this.actionMode === 'ranged') {
+                    // Ranged attack uses character's range stat
+                    const attackRange = this.getAttackRangeWithPortal(char);
+                    this.validAttacks = attackRange.filter(([x, y]) => {
+                        const enemy = this.getEnemyAt(x, y);
+                        return enemy !== null;
+                    });
+                } else if (this.actionMode === 'capture') {
+                    // Capture shows valid ally positions
+                    const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
+                    this.validMoves = moves.filter(([x, y]) => {
+                        const ally = this.getCharacterAt(x, y);
+                        return ally && ally !== char && ally.isAlive;
+                    });
+                } else if (this.actionMode === 'special') {
+                    // Special ability (portal for wizard)
+                    if (char.hasPortalAbility) {
+                        const moves = char.getValidMoves(obstacles);
+                        this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
                     }
                 }
             }
 
             selectCharacter(char) {
                 this.selectedChar = char;
-                const obstacles = this.getObstacles();
-                const moves = char.getValidMoves(obstacles);
-                this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
-
-                const attackRange = char.getAttackRange();
-                this.validAttacks = attackRange.filter(([x, y]) => {
-                    const enemy = this.getEnemyAt(x, y);
-                    return enemy !== null;
-                });
-
+                this.actionMode = 'move'; // Reset to move mode
+                this.updateValidActionsForMode();
                 this.addMessage(`Selected ${char.name} (${char.pieceType})`);
                 this.updateUI();
             }
@@ -1103,11 +1286,17 @@
                 this.updateUI();
             }
 
-            attackEnemy(attacker, target) {
-                const damage = attacker.calculateDamage();
-                const actualDamage = target.takeDamage(damage);
+            attackEnemy(attacker, target, attackType = 'melee') {
+                let damage = attacker.calculateDamage();
 
-                this.addMessage(`${attacker.name} attacks ${target.name} for ${actualDamage} dmg!`, 'damage');
+                // Ranged attacks deal less damage
+                if (attackType === 'ranged') {
+                    damage = Math.floor(damage * 0.8);
+                }
+
+                const actualDamage = target.takeDamage(damage);
+                const attackName = attackType === 'ranged' ? 'ranged attacks' : 'attacks';
+                this.addMessage(`${attacker.name} ${attackName} ${target.name} for ${actualDamage} dmg!`, 'damage');
 
                 if (!target.isAlive) {
                     this.addMessage(`${target.name} defeated!`, 'important');
@@ -1125,6 +1314,22 @@
                 this.selectedChar = null;
                 this.validMoves = [];
                 this.validAttacks = [];
+                this.updateUI();
+            }
+
+            swapPositions(char1, char2) {
+                const tempX = char1.x;
+                const tempY = char1.y;
+                char1.x = char2.x;
+                char1.y = char2.y;
+                char2.x = tempX;
+                char2.y = tempY;
+
+                this.addMessage(`${char1.name} ↔ ${char2.name} swapped positions!`, 'important');
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.updateFogOfWar();
                 this.updateUI();
             }
 
@@ -1305,6 +1510,7 @@
                     if (!char.isAlive) div.classList.add('dead');
 
                     const hpPercent = (char.hp / char.maxHp) * 100;
+                    const isSelected = char === this.selectedChar;
 
                     div.innerHTML = `
                         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -1318,10 +1524,22 @@
                         </div>
                         <div class="stat-line">HP: ${char.hp}/${char.maxHp} | XP: ${char.xp}/${char.xpToNext}</div>
                         ${char.hasPortalAbility ? '<div class="stat-line" style="color: #9333ea;">🌀 Portal Ability</div>' : ''}
+                        ${isSelected ? `
+                        <div class="action-buttons">
+                            <button class="action-button ${this.actionMode === 'move' ? 'active' : ''}" onclick="game.setActionMode('move')">Move [M]</button>
+                            <button class="action-button ${this.actionMode === 'melee' ? 'active' : ''}" onclick="game.setActionMode('melee')">Melee [A]</button>
+                            <button class="action-button ${this.actionMode === 'ranged' ? 'active' : ''}" onclick="game.setActionMode('ranged')">Range [G]</button>
+                            <button class="action-button ${this.actionMode === 'capture' ? 'active' : ''}" onclick="game.setActionMode('capture')">Swap [C]</button>
+                            ${char.hasPortalAbility ? `<button class="action-button ${this.actionMode === 'special' ? 'active' : ''}" onclick="game.setActionMode('special')">Portal [S]</button>` : ''}
+                        </div>
+                        ` : ''}
                     `;
 
-                    div.onclick = () => {
-                        if (char.isAlive) this.selectCharacter(char);
+                    div.onclick = (e) => {
+                        // Don't select if clicking on a button
+                        if (e.target.tagName !== 'BUTTON' && char.isAlive) {
+                            this.selectCharacter(char);
+                        }
                     };
 
                     partyList.appendChild(div);
@@ -1359,27 +1577,27 @@
             initSpriteLegend() {
                 const legend = document.getElementById('sprite-legend');
                 const items = [
-                    { sprite: SPRITES.WIZARD, name: 'Wizard (Bishop)' },
-                    { sprite: SPRITES.WARRIOR, name: 'Warrior (Rook)' },
-                    { sprite: SPRITES.THIEF, name: 'Thief (Knight)' },
-                    { sprite: SPRITES.HEALER, name: 'Healer (Queen)' },
-                    { sprite: SPRITES.ASSASSIN, name: 'Assassin (Pawn)' },
-                    { sprite: SPRITES.PALADIN, name: 'Paladin (King)' },
+                    { sprite: SPRITES.WIZARD, name: 'Wizard' },
+                    { sprite: SPRITES.WARRIOR, name: 'Warrior' },
+                    { sprite: SPRITES.THIEF, name: 'Thief' },
+                    { sprite: SPRITES.HEALER, name: 'Healer' },
+                    { sprite: SPRITES.ASSASSIN, name: 'Assassin' },
+                    { sprite: SPRITES.PALADIN, name: 'Paladin' },
                     { sprite: SPRITES.GOBLIN, name: 'Goblin' },
                     { sprite: SPRITES.SPIDER, name: 'Spider' },
                     { sprite: SPRITES.BOSS, name: 'Boss' },
                     { sprite: SPRITES.WALL, name: 'Wall' },
-                    { sprite: SPRITES.LOCKED_DOOR, name: 'Locked Door' },
                     { sprite: SPRITES.KEY, name: 'Key' },
                     { sprite: SPRITES.LOOT, name: 'Loot' },
-                    { sprite: SPRITES.POWERUP, name: 'Power-up' },
-                    { sprite: SPRITES.PORTAL, name: 'Portal' }
+                    { sprite: SPRITES.POWERUP, name: 'Power' },
+                    { sprite: SPRITES.PORTAL, name: 'Portal' },
+                    { sprite: SPRITES.LOCKED_DOOR, name: 'Locked' }
                 ];
 
                 legend.innerHTML = items.map(item => `
                     <div class="legend-item">
-                        <div class="legend-sprite">${item.sprite}</div>
-                        <div class="legend-text">${item.name}</div>
+                        <span class="legend-sprite">${item.sprite}</span>
+                        <span class="legend-text">${item.name}</span>
                     </div>
                 `).join('');
             }
