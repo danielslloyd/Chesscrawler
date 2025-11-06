@@ -418,10 +418,12 @@
         // ============================================================================
 
         const TILE_SIZE = 32;
-        const BOARD_WIDTH = 30;
-        const BOARD_HEIGHT = 25;
-        const CANVAS_WIDTH = BOARD_WIDTH * TILE_SIZE;  // 960
-        const CANVAS_HEIGHT = BOARD_HEIGHT * TILE_SIZE; // 800
+        const BOARD_WIDTH = 80;   // Increased from 30
+        const BOARD_HEIGHT = 60;  // Increased from 25
+        const VIEWPORT_WIDTH = 30;  // Visible tiles in width
+        const VIEWPORT_HEIGHT = 25; // Visible tiles in height
+        const CANVAS_WIDTH = VIEWPORT_WIDTH * TILE_SIZE;  // 960
+        const CANVAS_HEIGHT = VIEWPORT_HEIGHT * TILE_SIZE; // 800
 
         const SPRITES = {
             // Terrain
@@ -838,10 +840,10 @@
 
                 this.hoveredTile = null;
 
-                this.initBoard();
-                this.initParty();
                 this.generateDungeon();
+                this.initParty();
                 this.initEnemies();
+                this.centerCameraOnParty();
                 this.updateFogOfWar();
                 this.setupEventListeners();
                 this.updateUI();
@@ -870,13 +872,53 @@
             }
 
             initParty() {
+                // Find suitable starting positions (floor tiles near the start)
+                const startTiles = [];
+                for (let y = 5; y < 20; y++) {
+                    for (let x = 5; x < 20; x++) {
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                            startTiles.push({ x, y });
+                        }
+                    }
+                }
+
+                // Default positions if no suitable tiles found
+                if (startTiles.length === 0) {
+                    startTiles.push({ x: 10, y: 10 }, { x: 11, y: 10 }, { x: 10, y: 11 },
+                                    { x: 11, y: 11 }, { x: 12, y: 10 }, { x: 12, y: 11 });
+                }
+
+                // Pick a cluster of tiles for the party
+                const startPos = startTiles[0];
+                const partyTiles = [startPos];
+
+                // Find adjacent tiles for other party members
+                for (let i = 1; i < 6; i++) {
+                    let found = false;
+                    for (const tile of startTiles) {
+                        // Check if adjacent to any existing party tile
+                        for (const pTile of partyTiles) {
+                            const dist = Math.abs(tile.x - pTile.x) + Math.abs(tile.y - pTile.y);
+                            if (dist <= 2 && !partyTiles.some(t => t.x === tile.x && t.y === tile.y)) {
+                                partyTiles.push(tile);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found) break;
+                    }
+                    if (!found && i < startTiles.length) {
+                        partyTiles.push(startTiles[i]);
+                    }
+                }
+
                 this.party = [
-                    new Character('Gandor', 'wizard', 'bishop', SPRITES.WIZARD, 2, 2),
-                    new Character('Brutus', 'warrior', 'rook', SPRITES.WARRIOR, 3, 2),
-                    new Character('Swift', 'thief', 'knight', SPRITES.THIEF, 2, 3),
-                    new Character('Aria', 'healer', 'queen', SPRITES.HEALER, 3, 3),
-                    new Character('Shadow', 'assassin', 'pawn', SPRITES.ASSASSIN, 4, 2),
-                    new Character('Valor', 'paladin', 'king', SPRITES.PALADIN, 4, 3)
+                    new Character('Gandor', 'wizard', 'bishop', SPRITES.WIZARD, partyTiles[0].x, partyTiles[0].y),
+                    new Character('Brutus', 'warrior', 'rook', SPRITES.WARRIOR, partyTiles[1].x, partyTiles[1].y),
+                    new Character('Swift', 'thief', 'knight', SPRITES.THIEF, partyTiles[2].x, partyTiles[2].y),
+                    new Character('Aria', 'healer', 'queen', SPRITES.HEALER, partyTiles[3].x, partyTiles[3].y),
+                    new Character('Shadow', 'assassin', 'pawn', SPRITES.ASSASSIN, partyTiles[4].x, partyTiles[4].y),
+                    new Character('Valor', 'paladin', 'king', SPRITES.PALADIN, partyTiles[5].x, partyTiles[5].y)
                 ];
 
                 // Give wizard portal ability
@@ -884,70 +926,340 @@
             }
 
             generateDungeon() {
-                // Simple room-based dungeon
                 this.initBoard();
 
-                // Add walls around edges
-                for (let x = 0; x < BOARD_WIDTH; x++) {
-                    this.board[0][x].type = TILE_TYPES.WALL;
-                    this.board[BOARD_HEIGHT - 1][x].type = TILE_TYPES.WALL;
-                }
+                // Fill entire map with walls initially
                 for (let y = 0; y < BOARD_HEIGHT; y++) {
-                    this.board[y][0].type = TILE_TYPES.WALL;
-                    this.board[y][BOARD_WIDTH - 1].type = TILE_TYPES.WALL;
-                }
-
-                // Create rooms
-                const rooms = [
-                    { x: 5, y: 5, w: 8, h: 6 },
-                    { x: 15, y: 3, w: 10, h: 8 },
-                    { x: 8, y: 14, w: 7, h: 7 },
-                    { x: 18, y: 15, w: 9, h: 7 }
-                ];
-
-                // Add some internal walls
-                for (let y = 5; y < 20; y++) {
-                    if (y !== 10) {
-                        this.board[y][12].type = TILE_TYPES.WALL;
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        this.board[y][x].type = TILE_TYPES.WALL;
                     }
                 }
 
-                // Add locked door
-                this.lockedDoorPosition = { x: 12, y: 10 };
-                this.board[10][12].type = TILE_TYPES.LOCKED_DOOR;
+                // Generate rooms using BSP
+                const rooms = this.generateRoomsBSP();
 
-                // Add key
-                this.keyPosition = { x: 20, y: 6 };
-                this.board[6][20].type = TILE_TYPES.KEY;
+                // Carve rooms
+                for (const room of rooms) {
+                    for (let y = room.y; y < room.y + room.h; y++) {
+                        for (let x = room.x; x < room.x + room.w; x++) {
+                            if (x > 0 && x < BOARD_WIDTH - 1 && y > 0 && y < BOARD_HEIGHT - 1) {
+                                this.board[y][x].type = TILE_TYPES.FLOOR;
+                            }
+                        }
+                    }
+                }
 
-                // Add some loot
-                this.board[16][10].type = TILE_TYPES.LOOT;
-                this.board[19][19].type = TILE_TYPES.POWERUP;
-                this.board[22][5].type = TILE_TYPES.LOOT;
+                // Connect rooms with irregular corridors
+                for (let i = 0; i < rooms.length - 1; i++) {
+                    const room1 = rooms[i];
+                    const room2 = rooms[i + 1];
+                    this.createIrregularCorridor(room1, room2);
+                }
+
+                // Add some extra connections for loops
+                for (let i = 0; i < Math.floor(rooms.length / 3); i++) {
+                    const r1 = rooms[Math.floor(Math.random() * rooms.length)];
+                    const r2 = rooms[Math.floor(Math.random() * rooms.length)];
+                    if (r1 !== r2) {
+                        this.createIrregularCorridor(r1, r2);
+                    }
+                }
+
+                // Apply cellular automata to make corridors more organic
+                this.smoothDungeon(2);
+
+                // Place locked door in a strategic corridor
+                this.placeLockedDoor();
+
+                // Place key in a far room
+                this.placeKey(rooms);
+
+                // Place loot randomly
+                this.placeLoot(5, rooms);
+            }
+
+            generateRoomsBSP() {
+                const rooms = [];
+                const minRoomSize = 4;
+                const maxRoomSize = 10;
+
+                class BSPNode {
+                    constructor(x, y, w, h) {
+                        this.x = x;
+                        this.y = y;
+                        this.w = w;
+                        this.h = h;
+                        this.left = null;
+                        this.right = null;
+                        this.room = null;
+                    }
+
+                    split(depth = 0) {
+                        if (depth > 4) return;
+
+                        const horizontal = Math.random() > 0.5;
+
+                        if (horizontal) {
+                            if (this.h < minRoomSize * 2 + 2) return;
+                            const splitPos = minRoomSize + Math.floor(Math.random() * (this.h - minRoomSize * 2));
+                            this.left = new BSPNode(this.x, this.y, this.w, splitPos);
+                            this.right = new BSPNode(this.x, this.y + splitPos, this.w, this.h - splitPos);
+                        } else {
+                            if (this.w < minRoomSize * 2 + 2) return;
+                            const splitPos = minRoomSize + Math.floor(Math.random() * (this.w - minRoomSize * 2));
+                            this.left = new BSPNode(this.x, this.y, splitPos, this.h);
+                            this.right = new BSPNode(this.x + splitPos, this.y, this.w - splitPos, this.h);
+                        }
+
+                        if (this.left) this.left.split(depth + 1);
+                        if (this.right) this.right.split(depth + 1);
+                    }
+
+                    createRooms() {
+                        if (this.left || this.right) {
+                            if (this.left) this.left.createRooms();
+                            if (this.right) this.right.createRooms();
+                        } else {
+                            // Create a room in this leaf
+                            const w = minRoomSize + Math.floor(Math.random() * Math.min(maxRoomSize - minRoomSize, this.w - 2));
+                            const h = minRoomSize + Math.floor(Math.random() * Math.min(maxRoomSize - minRoomSize, this.h - 2));
+                            const x = this.x + 1 + Math.floor(Math.random() * (this.w - w - 2));
+                            const y = this.y + 1 + Math.floor(Math.random() * (this.h - h - 2));
+                            this.room = { x, y, w, h, centerX: x + Math.floor(w / 2), centerY: y + Math.floor(h / 2) };
+                        }
+                    }
+
+                    getRooms(roomList = []) {
+                        if (this.room) {
+                            roomList.push(this.room);
+                        }
+                        if (this.left) this.left.getRooms(roomList);
+                        if (this.right) this.right.getRooms(roomList);
+                        return roomList;
+                    }
+                }
+
+                const root = new BSPNode(1, 1, BOARD_WIDTH - 2, BOARD_HEIGHT - 2);
+                root.split();
+                root.createRooms();
+                return root.getRooms();
+            }
+
+            createIrregularCorridor(room1, room2) {
+                let x = room1.centerX;
+                let y = room1.centerY;
+                const targetX = room2.centerX;
+                const targetY = room2.centerY;
+
+                // Random walk with bias towards target
+                while (x !== targetX || y !== targetY) {
+                    // Carve current position and neighbors for wider corridors
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const nx = x + dx;
+                            const ny = y + dy;
+                            if (nx > 0 && nx < BOARD_WIDTH - 1 && ny > 0 && ny < BOARD_HEIGHT - 1) {
+                                if (Math.random() > 0.3) { // 70% chance to carve each neighbor
+                                    this.board[ny][nx].type = TILE_TYPES.FLOOR;
+                                }
+                            }
+                        }
+                    }
+
+                    // Move towards target with some randomness
+                    const directions = [];
+
+                    if (x < targetX) directions.push([1, 0]);
+                    if (x > targetX) directions.push([-1, 0]);
+                    if (y < targetY) directions.push([0, 1]);
+                    if (y > targetY) directions.push([0, -1]);
+
+                    // Add random perpendicular movement occasionally
+                    if (Math.random() > 0.7) {
+                        directions.push([0, 1], [0, -1], [1, 0], [-1, 0]);
+                    }
+
+                    if (directions.length > 0) {
+                        const [dx, dy] = directions[Math.floor(Math.random() * directions.length)];
+                        x += dx;
+                        y += dy;
+
+                        // Clamp to bounds
+                        x = Math.max(1, Math.min(BOARD_WIDTH - 2, x));
+                        y = Math.max(1, Math.min(BOARD_HEIGHT - 2, y));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            smoothDungeon(iterations) {
+                for (let iter = 0; iter < iterations; iter++) {
+                    const newBoard = JSON.parse(JSON.stringify(this.board));
+
+                    for (let y = 1; y < BOARD_HEIGHT - 1; y++) {
+                        for (let x = 1; x < BOARD_WIDTH - 1; x++) {
+                            const wallCount = this.countAdjacentWalls(x, y);
+
+                            // Apply cellular automata rules
+                            if (this.board[y][x].type === TILE_TYPES.WALL) {
+                                if (wallCount < 4) {
+                                    newBoard[y][x].type = TILE_TYPES.FLOOR;
+                                }
+                            } else {
+                                if (wallCount >= 5) {
+                                    newBoard[y][x].type = TILE_TYPES.WALL;
+                                }
+                            }
+                        }
+                    }
+
+                    this.board = newBoard;
+                }
+            }
+
+            countAdjacentWalls(x, y) {
+                let count = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        const nx = x + dx;
+                        const ny = y + dy;
+                        if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                            if (this.board[ny][nx].type === TILE_TYPES.WALL) {
+                                count++;
+                            }
+                        } else {
+                            count++; // Count out of bounds as walls
+                        }
+                    }
+                }
+                return count;
+            }
+
+            placeLockedDoor() {
+                // Find a narrow corridor (good for a locked door)
+                const candidates = [];
+
+                for (let y = 2; y < BOARD_HEIGHT - 2; y++) {
+                    for (let x = 2; x < BOARD_WIDTH - 2; x++) {
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                            const wallCount = this.countAdjacentWalls(x, y);
+                            if (wallCount >= 5 && wallCount <= 6) {
+                                candidates.push({ x, y });
+                            }
+                        }
+                    }
+                }
+
+                if (candidates.length > 0) {
+                    const pos = candidates[Math.floor(Math.random() * candidates.length)];
+                    this.lockedDoorPosition = pos;
+                    this.board[pos.y][pos.x].type = TILE_TYPES.LOCKED_DOOR;
+                }
+            }
+
+            placeKey(rooms) {
+                if (rooms.length > 0) {
+                    const room = rooms[Math.floor(Math.random() * rooms.length)];
+                    this.keyPosition = { x: room.centerX, y: room.centerY };
+                    this.board[room.centerY][room.centerX].type = TILE_TYPES.KEY;
+                }
+            }
+
+            placeLoot(count, rooms) {
+                for (let i = 0; i < count; i++) {
+                    if (rooms.length > 0) {
+                        const room = rooms[Math.floor(Math.random() * rooms.length)];
+                        const x = room.x + Math.floor(Math.random() * room.w);
+                        const y = room.y + Math.floor(Math.random() * room.h);
+
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                            this.board[y][x].type = i % 2 === 0 ? TILE_TYPES.LOOT : TILE_TYPES.POWERUP;
+                        }
+                    }
+                }
             }
 
             initEnemies() {
-                const spawns = [
-                    { x: 18, y: 6, type: 'goblin', piece: 'knight' },
-                    { x: 22, y: 8, type: 'goblin', piece: 'rook' },
-                    { x: 11, y: 16, type: 'spider', piece: 'knight' },
-                    { x: 20, y: 18, type: 'spider', piece: 'bishop' },
-                    { x: 25, y: 20, type: 'boss', piece: 'queen' }
+                this.enemies = [];
+
+                // Find floor tiles for enemy placement
+                const floorTiles = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                            // Check not too close to party starting position
+                            const dist = Math.abs(x - this.party[0].x) + Math.abs(y - this.party[0].y);
+                            if (dist > 15) {
+                                floorTiles.push({ x, y });
+                            }
+                        }
+                    }
+                }
+
+                // Shuffle floor tiles
+                for (let i = floorTiles.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [floorTiles[i], floorTiles[j]] = [floorTiles[j], floorTiles[i]];
+                }
+
+                // Place enemies
+                const enemyCount = 8 + this.dungeonLevel * 2;
+                const enemyTypes = [
+                    { type: 'goblin', piece: 'knight', sprite: SPRITES.GOBLIN, weight: 3 },
+                    { type: 'goblin', piece: 'rook', sprite: SPRITES.GOBLIN, weight: 2 },
+                    { type: 'spider', piece: 'knight', sprite: SPRITES.SPIDER, weight: 3 },
+                    { type: 'spider', piece: 'bishop', sprite: SPRITES.SPIDER, weight: 2 },
+                    { type: 'boss', piece: 'queen', sprite: SPRITES.BOSS, weight: 1 }
                 ];
 
-                this.enemies = [];
-                for (const spawn of spawns) {
+                for (let i = 0; i < Math.min(enemyCount, floorTiles.length); i++) {
+                    const tile = floorTiles[i];
+
+                    // Pick random enemy type
+                    const totalWeight = enemyTypes.reduce((sum, e) => sum + e.weight, 0);
+                    let rand = Math.random() * totalWeight;
+                    let selectedType = enemyTypes[0];
+
+                    for (const et of enemyTypes) {
+                        rand -= et.weight;
+                        if (rand <= 0) {
+                            selectedType = et;
+                            break;
+                        }
+                    }
+
                     const enemy = new Enemy(
-                        `${spawn.type}_${this.enemies.length}`,
-                        spawn.type,
-                        spawn.piece,
-                        spawn.type === 'boss' ? SPRITES.BOSS : (spawn.type === 'goblin' ? SPRITES.GOBLIN : SPRITES.SPIDER),
-                        spawn.x,
-                        spawn.y,
+                        `${selectedType.type}_${this.enemies.length}`,
+                        selectedType.type,
+                        selectedType.piece,
+                        selectedType.sprite,
+                        tile.x,
+                        tile.y,
                         this.dungeonLevel
                     );
                     this.enemies.push(enemy);
                 }
+            }
+
+            centerCameraOnParty() {
+                // Calculate party center
+                const livingParty = this.party.filter(c => c.isAlive);
+                if (livingParty.length === 0) return;
+
+                let sumX = 0, sumY = 0;
+                for (const char of livingParty) {
+                    sumX += char.x;
+                    sumY += char.y;
+                }
+
+                const centerX = Math.floor(sumX / livingParty.length);
+                const centerY = Math.floor(sumY / livingParty.length);
+
+                // Center camera on party
+                this.cameraX = Math.max(0, Math.min(BOARD_WIDTH - VIEWPORT_WIDTH, centerX - Math.floor(VIEWPORT_WIDTH / 2)));
+                this.cameraY = Math.max(0, Math.min(BOARD_HEIGHT - VIEWPORT_HEIGHT, centerY - Math.floor(VIEWPORT_HEIGHT / 2)));
             }
 
             setupEventListeners() {
@@ -957,6 +1269,46 @@
                     this.handleRightClick(e);
                 });
                 this.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+
+                // Mouse drag for panning
+                let isDragging = false;
+                let dragStartX = 0;
+                let dragStartY = 0;
+                let dragStartCameraX = 0;
+                let dragStartCameraY = 0;
+
+                this.canvas.addEventListener('mousedown', (e) => {
+                    if (e.button === 1 || (e.button === 0 && e.shiftKey)) { // Middle mouse or Shift+Left
+                        isDragging = true;
+                        dragStartX = e.clientX;
+                        dragStartY = e.clientY;
+                        dragStartCameraX = this.cameraX;
+                        dragStartCameraY = this.cameraY;
+                        e.preventDefault();
+                    }
+                });
+
+                this.canvas.addEventListener('mousemove', (e) => {
+                    if (isDragging) {
+                        const rect = this.canvas.getBoundingClientRect();
+                        const scaleX = this.canvas.width / rect.width;
+                        const scaleY = this.canvas.height / rect.height;
+
+                        const deltaX = (e.clientX - dragStartX) * scaleX;
+                        const deltaY = (e.clientY - dragStartY) * scaleY;
+
+                        this.cameraX = Math.max(0, Math.min(BOARD_WIDTH - VIEWPORT_WIDTH,
+                            dragStartCameraX - Math.floor(deltaX / TILE_SIZE)));
+                        this.cameraY = Math.max(0, Math.min(BOARD_HEIGHT - VIEWPORT_HEIGHT,
+                            dragStartCameraY - Math.floor(deltaY / TILE_SIZE)));
+                    }
+                });
+
+                document.addEventListener('mouseup', (e) => {
+                    if (e.button === 1 || e.button === 0) {
+                        isDragging = false;
+                    }
+                });
 
                 this.editorCanvas.addEventListener('click', (e) => this.handleEditorClick(e));
                 this.editorCanvas.addEventListener('contextmenu', (e) => {
@@ -989,6 +1341,21 @@
                         this.setActionMode('capture');
                     } else if (e.key === 's' || e.key === 'S') {
                         this.setActionMode('special');
+                    } else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
+                        e.preventDefault();
+                        this.cameraY = Math.max(0, this.cameraY - 1);
+                    } else if (e.key === 'ArrowDown' || e.key === 'd' || e.key === 'D') {
+                        e.preventDefault();
+                        this.cameraY = Math.min(BOARD_HEIGHT - VIEWPORT_HEIGHT, this.cameraY + 1);
+                    } else if (e.key === 'ArrowLeft') {
+                        e.preventDefault();
+                        this.cameraX = Math.max(0, this.cameraX - 1);
+                    } else if (e.key === 'ArrowRight') {
+                        e.preventDefault();
+                        this.cameraX = Math.min(BOARD_WIDTH - VIEWPORT_WIDTH, this.cameraX + 1);
+                    } else if (e.key === 'Home' || e.key === 'h' || e.key === 'H') {
+                        e.preventDefault();
+                        this.centerCameraOnParty();
                     }
                 });
             }
@@ -1009,8 +1376,12 @@
                 const scaleY = canvas.height / rect.height;
                 const canvasX = (e.clientX - rect.left) * scaleX;
                 const canvasY = (e.clientY - rect.top) * scaleY;
-                const x = Math.floor(canvasX / TILE_SIZE);
-                const y = Math.floor(canvasY / TILE_SIZE);
+                const viewportX = Math.floor(canvasX / TILE_SIZE);
+                const viewportY = Math.floor(canvasY / TILE_SIZE);
+
+                // Convert viewport coordinates to world coordinates
+                const x = viewportX + this.cameraX;
+                const y = viewportY + this.cameraY;
                 return { x, y };
             }
 
@@ -1120,24 +1491,165 @@
 
             getMovesWithPortal(baseX, baseY, obstacles) {
                 const moves = [];
-                const movesFromBase = ChessMove.getMoves(this.selectedChar.pieceType, baseX, baseY, obstacles);
-                const baseMoves = movesFromBase.moves || movesFromBase || [];
+                const visited = new Set();
+                const pieceType = this.selectedChar.pieceType;
 
-                // Add base moves
-                for (const move of baseMoves) {
-                    moves.push(move);
+                // Get all portal pairs
+                const portals = [];
+                for (const char of this.party) {
+                    if (char.hasPortalAbility && char.portalStart && char.portalEnd) {
+                        portals.push({
+                            start: char.portalStart,
+                            end: char.portalEnd
+                        });
+                    }
                 }
 
-                // Check if on a portal
-                const portalLink = this.getPortalLink(baseX, baseY);
-                if (portalLink) {
-                    // Add moves from the other portal end
-                    const portalMoves = ChessMove.getMoves(this.selectedChar.pieceType, portalLink.x, portalLink.y, obstacles);
-                    const portalBaseMoves = portalMoves.moves || portalMoves || [];
-                    for (const move of portalBaseMoves) {
-                        // Check if not already in the list
-                        if (!moves.some(([mx, my]) => mx === move[0] && my === move[1])) {
-                            moves.push(move);
+                const addMove = (x, y) => {
+                    const key = `${x},${y}`;
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        moves.push([x, y]);
+                    }
+                };
+
+                const findPortalLink = (x, y) => {
+                    for (const portal of portals) {
+                        if (x === portal.start.x && y === portal.start.y) {
+                            return portal.end;
+                        }
+                        if (x === portal.end.x && y === portal.end.y) {
+                            return portal.start;
+                        }
+                    }
+                    return null;
+                };
+
+                // Handle different piece types with portal traversal
+                if (pieceType === 'knight') {
+                    // Knight: atomic jumps, if landing on portal, continue from other side
+                    const offsets = [
+                        [2, 1], [2, -1], [-2, 1], [-2, -1],
+                        [1, 2], [1, -2], [-1, 2], [-1, -2]
+                    ];
+
+                    const processKnightMoves = (fromX, fromY, depth = 0) => {
+                        if (depth > 2) return; // Limit recursion
+
+                        for (const [dx, dy] of offsets) {
+                            const nx = fromX + dx;
+                            const ny = fromY + dy;
+
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                const key = `${nx},${ny}`;
+                                if (!visited.has(key)) {
+                                    addMove(nx, ny);
+
+                                    // Check if landed on a portal
+                                    const portalLink = findPortalLink(nx, ny);
+                                    if (portalLink && depth < 2) {
+                                        // Continue knight moves from the other portal
+                                        processKnightMoves(portalLink.x, portalLink.y, depth + 1);
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    processKnightMoves(baseX, baseY);
+
+                } else if (pieceType === 'rook' || pieceType === 'bishop' || pieceType === 'queen') {
+                    // Sliding pieces: trace paths, if hit portal, continue from other side
+                    const directions = pieceType === 'rook' ? [[0, 1], [0, -1], [1, 0], [-1, 0]] :
+                                      pieceType === 'bishop' ? [[1, 1], [1, -1], [-1, 1], [-1, -1]] :
+                                      [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+                    const tracePath = (startX, startY, dx, dy, usedPortals = new Set()) => {
+                        let steps = 1;
+                        while (true) {
+                            const nx = startX + dx * steps;
+                            const ny = startY + dy * steps;
+
+                            if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) break;
+
+                            const key = `${nx},${ny}`;
+                            if (obstacles.has(key)) break;
+
+                            addMove(nx, ny);
+
+                            // Check if we hit a portal
+                            const portalLink = findPortalLink(nx, ny);
+                            if (portalLink) {
+                                const portalKey = `${nx},${ny}->${portalLink.x},${portalLink.y}`;
+                                if (!usedPortals.has(portalKey)) {
+                                    // Teleport to other portal and continue in same direction
+                                    usedPortals.add(portalKey);
+                                    tracePath(portalLink.x, portalLink.y, dx, dy, usedPortals);
+                                    break;
+                                }
+                            }
+
+                            steps++;
+                        }
+                    };
+
+                    for (const [dx, dy] of directions) {
+                        tracePath(baseX, baseY, dx, dy);
+                    }
+
+                } else if (pieceType === 'king') {
+                    // King: adjacent moves, if move to portal, add moves from other side
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = baseX + dx;
+                            const ny = baseY + dy;
+
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                const key = `${nx},${ny}`;
+                                if (!obstacles.has(key)) {
+                                    addMove(nx, ny);
+
+                                    // Check if moved to a portal
+                                    const portalLink = findPortalLink(nx, ny);
+                                    if (portalLink) {
+                                        // Add king moves from the other portal
+                                        for (let dx2 = -1; dx2 <= 1; dx2++) {
+                                            for (let dy2 = -1; dy2 <= 1; dy2++) {
+                                                if (dx2 === 0 && dy2 === 0) continue;
+                                                const nx2 = portalLink.x + dx2;
+                                                const ny2 = portalLink.y + dy2;
+
+                                                if (nx2 >= 0 && nx2 < BOARD_WIDTH && ny2 >= 0 && ny2 < BOARD_HEIGHT) {
+                                                    const key2 = `${nx2},${ny2}`;
+                                                    if (!obstacles.has(key2)) {
+                                                        addMove(nx2, ny2);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                } else if (pieceType === 'pawn') {
+                    // Pawn: forward movement, if move to portal, add moves from other side
+                    if (baseY > 0) {
+                        const key = `${baseX},${baseY - 1}`;
+                        if (!obstacles.has(key)) {
+                            addMove(baseX, baseY - 1);
+
+                            // Check if moved to a portal
+                            const portalLink = findPortalLink(baseX, baseY - 1);
+                            if (portalLink && portalLink.y > 0) {
+                                // Add pawn move from the other portal
+                                const key2 = `${portalLink.x},${portalLink.y - 1}`;
+                                if (!obstacles.has(key2)) {
+                                    addMove(portalLink.x, portalLink.y - 1);
+                                }
+                            }
                         }
                     }
                 }
@@ -1147,12 +1659,159 @@
 
             getAttackRangeWithPortal(char) {
                 const attacks = [];
+                const visited = new Set();
 
-                // Get base attack range
+                // Get all portal pairs
+                const portals = [];
+                for (const c of this.party) {
+                    if (c.hasPortalAbility && c.portalStart && c.portalEnd) {
+                        portals.push({
+                            start: c.portalStart,
+                            end: c.portalEnd
+                        });
+                    }
+                }
+
+                const addAttack = (x, y) => {
+                    const key = `${x},${y}`;
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        attacks.push([x, y]);
+                    }
+                };
+
+                const findPortalLink = (x, y) => {
+                    for (const portal of portals) {
+                        if (x === portal.start.x && y === portal.start.y) {
+                            return portal.end;
+                        }
+                        if (x === portal.end.x && y === portal.end.y) {
+                            return portal.start;
+                        }
+                    }
+                    return null;
+                };
+
                 if (char.attackType === 'melee') {
-                    const baseMoves = char.getValidMoves(new Set());
-                    attacks.push(...baseMoves);
+                    // Melee uses movement patterns with portal traversal
+                    const pieceType = char.pieceType;
+
+                    if (pieceType === 'knight') {
+                        const offsets = [
+                            [2, 1], [2, -1], [-2, 1], [-2, -1],
+                            [1, 2], [1, -2], [-1, 2], [-1, -2]
+                        ];
+
+                        const processKnightAttacks = (fromX, fromY, depth = 0) => {
+                            if (depth > 2) return;
+
+                            for (const [dx, dy] of offsets) {
+                                const nx = fromX + dx;
+                                const ny = fromY + dy;
+
+                                if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                    const key = `${nx},${ny}`;
+                                    if (!visited.has(key)) {
+                                        addAttack(nx, ny);
+
+                                        const portalLink = findPortalLink(nx, ny);
+                                        if (portalLink && depth < 2) {
+                                            processKnightAttacks(portalLink.x, portalLink.y, depth + 1);
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
+                        processKnightAttacks(char.x, char.y);
+
+                    } else if (pieceType === 'rook' || pieceType === 'bishop' || pieceType === 'queen') {
+                        const directions = pieceType === 'rook' ? [[0, 1], [0, -1], [1, 0], [-1, 0]] :
+                                          pieceType === 'bishop' ? [[1, 1], [1, -1], [-1, 1], [-1, -1]] :
+                                          [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+                        const tracePath = (startX, startY, dx, dy, usedPortals = new Set()) => {
+                            let steps = 1;
+                            while (true) {
+                                const nx = startX + dx * steps;
+                                const ny = startY + dy * steps;
+
+                                if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) break;
+
+                                // For melee attacks, we don't check obstacles (can attack through them)
+                                addAttack(nx, ny);
+
+                                const portalLink = findPortalLink(nx, ny);
+                                if (portalLink) {
+                                    const portalKey = `${nx},${ny}->${portalLink.x},${portalLink.y}`;
+                                    if (!usedPortals.has(portalKey)) {
+                                        usedPortals.add(portalKey);
+                                        tracePath(portalLink.x, portalLink.y, dx, dy, usedPortals);
+                                        break;
+                                    }
+                                }
+
+                                steps++;
+                            }
+                        };
+
+                        for (const [dx, dy] of directions) {
+                            tracePath(char.x, char.y, dx, dy);
+                        }
+
+                    } else if (pieceType === 'king') {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const nx = char.x + dx;
+                                const ny = char.y + dy;
+
+                                if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                    addAttack(nx, ny);
+
+                                    const portalLink = findPortalLink(nx, ny);
+                                    if (portalLink) {
+                                        for (let dx2 = -1; dx2 <= 1; dx2++) {
+                                            for (let dy2 = -1; dy2 <= 1; dy2++) {
+                                                if (dx2 === 0 && dy2 === 0) continue;
+                                                const nx2 = portalLink.x + dx2;
+                                                const ny2 = portalLink.y + dy2;
+
+                                                if (nx2 >= 0 && nx2 < BOARD_WIDTH && ny2 >= 0 && ny2 < BOARD_HEIGHT) {
+                                                    addAttack(nx2, ny2);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    } else if (pieceType === 'pawn') {
+                        // Pawn diagonal attacks
+                        if (char.y > 0) {
+                            if (char.x > 0) addAttack(char.x - 1, char.y - 1);
+                            if (char.x < BOARD_WIDTH - 1) addAttack(char.x + 1, char.y - 1);
+
+                            // Check portal for pawn attacks
+                            if (char.x > 0) {
+                                const portalLink = findPortalLink(char.x - 1, char.y - 1);
+                                if (portalLink && portalLink.y > 0) {
+                                    if (portalLink.x > 0) addAttack(portalLink.x - 1, portalLink.y - 1);
+                                    if (portalLink.x < BOARD_WIDTH - 1) addAttack(portalLink.x + 1, portalLink.y - 1);
+                                }
+                            }
+                            if (char.x < BOARD_WIDTH - 1) {
+                                const portalLink = findPortalLink(char.x + 1, char.y - 1);
+                                if (portalLink && portalLink.y > 0) {
+                                    if (portalLink.x > 0) addAttack(portalLink.x - 1, portalLink.y - 1);
+                                    if (portalLink.x < BOARD_WIDTH - 1) addAttack(portalLink.x + 1, portalLink.y - 1);
+                                }
+                            }
+                        }
+                    }
                 } else {
+                    // Ranged attacks use character's range stat
                     for (let dx = -char.range; dx <= char.range; dx++) {
                         for (let dy = -char.range; dy <= char.range; dy++) {
                             if (dx === 0 && dy === 0) continue;
@@ -1160,26 +1819,15 @@
                             const ny = char.y + dy;
                             if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
                                 if (Math.abs(dx) + Math.abs(dy) <= char.range) {
-                                    attacks.push([nx, ny]);
+                                    addAttack(nx, ny);
                                 }
                             }
                         }
                     }
-                }
 
-                // Check if on a portal
-                const portalLink = this.getPortalLink(char.x, char.y);
-                if (portalLink) {
-                    // Add attack range from the other portal end
-                    if (char.attackType === 'melee') {
-                        const portalMoves = ChessMove.getMoves(char.pieceType, portalLink.x, portalLink.y, new Set());
-                        const portalBaseMoves = portalMoves.moves || portalMoves || [];
-                        for (const move of portalBaseMoves) {
-                            if (!attacks.some(([mx, my]) => mx === move[0] && my === move[1])) {
-                                attacks.push(move);
-                            }
-                        }
-                    } else {
+                    // Add ranged attacks from portal location
+                    const portalLink = findPortalLink(char.x, char.y);
+                    if (portalLink) {
                         for (let dx = -char.range; dx <= char.range; dx++) {
                             for (let dy = -char.range; dy <= char.range; dy++) {
                                 if (dx === 0 && dy === 0) continue;
@@ -1187,9 +1835,7 @@
                                 const ny = portalLink.y + dy;
                                 if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
                                     if (Math.abs(dx) + Math.abs(dy) <= char.range) {
-                                        if (!attacks.some(([mx, my]) => mx === nx && my === ny)) {
-                                            attacks.push([nx, ny]);
-                                        }
+                                        addAttack(nx, ny);
                                     }
                                 }
                             }
@@ -1606,12 +2252,18 @@
                 this.ctx.fillStyle = '#1a202c';
                 this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+                // Draw only visible viewport
+                const startX = this.cameraX;
+                const startY = this.cameraY;
+                const endX = Math.min(BOARD_WIDTH, this.cameraX + VIEWPORT_WIDTH);
+                const endY = Math.min(BOARD_HEIGHT, this.cameraY + VIEWPORT_HEIGHT);
+
                 // Draw board
-                for (let y = 0; y < BOARD_HEIGHT; y++) {
-                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                for (let y = startY; y < endY; y++) {
+                    for (let x = startX; x < endX; x++) {
                         const tile = this.board[y][x];
-                        const px = x * TILE_SIZE;
-                        const py = y * TILE_SIZE;
+                        const screenX = (x - this.cameraX) * TILE_SIZE;
+                        const screenY = (y - this.cameraY) * TILE_SIZE;
 
                         // Check if explored
                         const explored = this.exploredTiles.has(`${x},${y}`);
@@ -1620,7 +2272,7 @@
                         if (!explored) {
                             // Completely dark
                             this.ctx.fillStyle = '#0a0a0a';
-                            this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                            this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
                             continue;
                         }
 
@@ -1630,7 +2282,7 @@
                         } else {
                             this.ctx.fillStyle = '#2d3748';
                         }
-                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                        this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
 
                         // Draw tile
                         let sprite = null;
@@ -1645,31 +2297,34 @@
                             this.ctx.font = '24px Arial';
                             this.ctx.textAlign = 'center';
                             this.ctx.textBaseline = 'middle';
-                            this.ctx.fillText(sprite, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
+                            this.ctx.fillText(sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
                         }
 
                         // Fog overlay
                         if (!visible) {
                             this.ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                            this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                            this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
                         }
                     }
                 }
 
-                // Draw hovered tile highlight (DEBUG)
+                // Draw hovered tile highlight
                 if (this.hoveredTile) {
-                    const px = this.hoveredTile.x * TILE_SIZE;
-                    const py = this.hoveredTile.y * TILE_SIZE;
-                    this.ctx.strokeStyle = '#00ff00';
-                    this.ctx.lineWidth = 3;
-                    this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                    const screenX = (this.hoveredTile.x - this.cameraX) * TILE_SIZE;
+                    const screenY = (this.hoveredTile.y - this.cameraY) * TILE_SIZE;
 
-                    // Draw coordinates
-                    this.ctx.fillStyle = '#00ff00';
-                    this.ctx.font = 'bold 12px Arial';
-                    this.ctx.textAlign = 'left';
-                    this.ctx.textBaseline = 'top';
-                    this.ctx.fillText(`${this.hoveredTile.x},${this.hoveredTile.y}`, px + 2, py + 2);
+                    if (screenX >= 0 && screenX < CANVAS_WIDTH && screenY >= 0 && screenY < CANVAS_HEIGHT) {
+                        this.ctx.strokeStyle = '#00ff00';
+                        this.ctx.lineWidth = 3;
+                        this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+
+                        // Draw coordinates
+                        this.ctx.fillStyle = '#00ff00';
+                        this.ctx.font = 'bold 12px Arial';
+                        this.ctx.textAlign = 'left';
+                        this.ctx.textBaseline = 'top';
+                        this.ctx.fillText(`${this.hoveredTile.x},${this.hoveredTile.y}`, screenX + 2, screenY + 2);
+                    }
                 }
 
                 // Draw valid moves
@@ -1679,10 +2334,12 @@
                     this.ctx.lineWidth = 2;
 
                     for (const [x, y] of this.validMoves) {
-                        const px = x * TILE_SIZE;
-                        const py = y * TILE_SIZE;
-                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-                        this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                        if (x >= startX && x < endX && y >= startY && y < endY) {
+                            const screenX = (x - this.cameraX) * TILE_SIZE;
+                            const screenY = (y - this.cameraY) * TILE_SIZE;
+                            this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                            this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                        }
                     }
 
                     // Draw attack range
@@ -1690,38 +2347,57 @@
                     this.ctx.strokeStyle = '#f56565';
 
                     for (const [x, y] of this.validAttacks) {
-                        const px = x * TILE_SIZE;
-                        const py = y * TILE_SIZE;
-                        this.ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-                        this.ctx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
+                        if (x >= startX && x < endX && y >= startY && y < endY) {
+                            const screenX = (x - this.cameraX) * TILE_SIZE;
+                            const screenY = (y - this.cameraY) * TILE_SIZE;
+                            this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                            this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                        }
                     }
                 }
 
                 // Draw portal
                 for (const char of this.party) {
                     if (char.hasPortalAbility && char.portalStart && char.portalEnd) {
-                        // Portal start
-                        const px1 = char.portalStart.x * TILE_SIZE;
-                        const py1 = char.portalStart.y * TILE_SIZE;
                         this.ctx.font = '28px Arial';
                         this.ctx.textAlign = 'center';
                         this.ctx.textBaseline = 'middle';
-                        this.ctx.fillText(SPRITES.PORTAL, px1 + TILE_SIZE / 2, py1 + TILE_SIZE / 2);
+
+                        // Portal start
+                        if (char.portalStart.x >= startX && char.portalStart.x < endX &&
+                            char.portalStart.y >= startY && char.portalStart.y < endY) {
+                            const screenX1 = (char.portalStart.x - this.cameraX) * TILE_SIZE;
+                            const screenY1 = (char.portalStart.y - this.cameraY) * TILE_SIZE;
+                            this.ctx.fillText(SPRITES.PORTAL, screenX1 + TILE_SIZE / 2, screenY1 + TILE_SIZE / 2);
+                        }
 
                         // Portal end
-                        const px2 = char.portalEnd.x * TILE_SIZE;
-                        const py2 = char.portalEnd.y * TILE_SIZE;
-                        this.ctx.fillText(SPRITES.PORTAL, px2 + TILE_SIZE / 2, py2 + TILE_SIZE / 2);
+                        if (char.portalEnd.x >= startX && char.portalEnd.x < endX &&
+                            char.portalEnd.y >= startY && char.portalEnd.y < endY) {
+                            const screenX2 = (char.portalEnd.x - this.cameraX) * TILE_SIZE;
+                            const screenY2 = (char.portalEnd.y - this.cameraY) * TILE_SIZE;
+                            this.ctx.fillText(SPRITES.PORTAL, screenX2 + TILE_SIZE / 2, screenY2 + TILE_SIZE / 2);
+                        }
 
-                        // Connection line
-                        this.ctx.strokeStyle = '#9333ea';
-                        this.ctx.lineWidth = 3;
-                        this.ctx.setLineDash([5, 5]);
-                        this.ctx.beginPath();
-                        this.ctx.moveTo(px1 + TILE_SIZE / 2, py1 + TILE_SIZE / 2);
-                        this.ctx.lineTo(px2 + TILE_SIZE / 2, py2 + TILE_SIZE / 2);
-                        this.ctx.stroke();
-                        this.ctx.setLineDash([]);
+                        // Connection line (if both visible)
+                        if (char.portalStart.x >= startX && char.portalStart.x < endX &&
+                            char.portalStart.y >= startY && char.portalStart.y < endY &&
+                            char.portalEnd.x >= startX && char.portalEnd.x < endX &&
+                            char.portalEnd.y >= startY && char.portalEnd.y < endY) {
+                            const screenX1 = (char.portalStart.x - this.cameraX) * TILE_SIZE;
+                            const screenY1 = (char.portalStart.y - this.cameraY) * TILE_SIZE;
+                            const screenX2 = (char.portalEnd.x - this.cameraX) * TILE_SIZE;
+                            const screenY2 = (char.portalEnd.y - this.cameraY) * TILE_SIZE;
+
+                            this.ctx.strokeStyle = '#9333ea';
+                            this.ctx.lineWidth = 3;
+                            this.ctx.setLineDash([5, 5]);
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(screenX1 + TILE_SIZE / 2, screenY1 + TILE_SIZE / 2);
+                            this.ctx.lineTo(screenX2 + TILE_SIZE / 2, screenY2 + TILE_SIZE / 2);
+                            this.ctx.stroke();
+                            this.ctx.setLineDash([]);
+                        }
                     }
                 }
 
@@ -1732,52 +2408,114 @@
 
                 for (const char of this.party) {
                     if (!char.isAlive) continue;
+                    if (char.x < startX || char.x >= endX || char.y < startY || char.y >= endY) continue;
 
                     const visible = !this.fogOfWar[char.y][char.x];
                     if (!visible) continue;
 
-                    const px = char.x * TILE_SIZE + TILE_SIZE / 2;
-                    const py = char.y * TILE_SIZE + TILE_SIZE / 2;
+                    const screenX = (char.x - this.cameraX) * TILE_SIZE;
+                    const screenY = (char.y - this.cameraY) * TILE_SIZE;
 
                     if (char === this.selectedChar) {
                         this.ctx.fillStyle = 'rgba(255, 215, 0, 0.4)';
-                        this.ctx.fillRect(char.x * TILE_SIZE, char.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
                         this.ctx.strokeStyle = '#ffd700';
                         this.ctx.lineWidth = 3;
-                        this.ctx.strokeRect(char.x * TILE_SIZE, char.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
                     }
 
-                    this.ctx.fillText(char.sprite, px, py);
+                    this.ctx.fillText(char.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
                 }
 
                 // Draw enemies
                 for (const enemy of this.enemies) {
                     if (!enemy.isAlive) continue;
+                    if (enemy.x < startX || enemy.x >= endX || enemy.y < startY || enemy.y >= endY) continue;
 
                     const visible = !this.fogOfWar[enemy.y][enemy.x];
                     if (!visible) continue;
 
-                    const px = enemy.x * TILE_SIZE + TILE_SIZE / 2;
-                    const py = enemy.y * TILE_SIZE + TILE_SIZE / 2;
+                    const screenX = (enemy.x - this.cameraX) * TILE_SIZE;
+                    const screenY = (enemy.y - this.cameraY) * TILE_SIZE;
 
-                    this.ctx.fillText(enemy.sprite, px, py);
+                    this.ctx.fillText(enemy.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
                 }
 
                 // Draw grid
                 this.ctx.strokeStyle = '#1a202c';
                 this.ctx.lineWidth = 1;
-                for (let x = 0; x <= BOARD_WIDTH; x++) {
+                for (let x = 0; x <= VIEWPORT_WIDTH; x++) {
                     this.ctx.beginPath();
                     this.ctx.moveTo(x * TILE_SIZE, 0);
-                    this.ctx.lineTo(x * TILE_SIZE, BOARD_HEIGHT * TILE_SIZE);
+                    this.ctx.lineTo(x * TILE_SIZE, VIEWPORT_HEIGHT * TILE_SIZE);
                     this.ctx.stroke();
                 }
-                for (let y = 0; y <= BOARD_HEIGHT; y++) {
+                for (let y = 0; y <= VIEWPORT_HEIGHT; y++) {
                     this.ctx.beginPath();
                     this.ctx.moveTo(0, y * TILE_SIZE);
-                    this.ctx.lineTo(BOARD_WIDTH * TILE_SIZE, y * TILE_SIZE);
+                    this.ctx.lineTo(VIEWPORT_WIDTH * TILE_SIZE, y * TILE_SIZE);
                     this.ctx.stroke();
                 }
+
+                // Draw minimap indicator
+                this.drawMinimap();
+            }
+
+            drawMinimap() {
+                const minimapSize = 150;
+                const minimapX = CANVAS_WIDTH - minimapSize - 10;
+                const minimapY = 10;
+                const tileW = minimapSize / BOARD_WIDTH;
+                const tileH = minimapSize / BOARD_HEIGHT;
+
+                // Draw minimap background
+                this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                this.ctx.fillRect(minimapX, minimapY, minimapSize, minimapSize);
+                this.ctx.strokeStyle = '#4a5568';
+                this.ctx.lineWidth = 2;
+                this.ctx.strokeRect(minimapX, minimapY, minimapSize, minimapSize);
+
+                // Draw explored tiles
+                for (const key of this.exploredTiles) {
+                    const [x, y] = key.split(',').map(Number);
+                    const tile = this.board[y][x];
+
+                    if (tile.type === TILE_TYPES.WALL) {
+                        this.ctx.fillStyle = '#4a5568';
+                    } else {
+                        this.ctx.fillStyle = '#2d3748';
+                    }
+
+                    this.ctx.fillRect(
+                        minimapX + x * tileW,
+                        minimapY + y * tileH,
+                        Math.max(1, tileW),
+                        Math.max(1, tileH)
+                    );
+                }
+
+                // Draw party members
+                for (const char of this.party) {
+                    if (char.isAlive) {
+                        this.ctx.fillStyle = '#4299e1';
+                        this.ctx.fillRect(
+                            minimapX + char.x * tileW,
+                            minimapY + char.y * tileH,
+                            Math.max(2, tileW),
+                            Math.max(2, tileH)
+                        );
+                    }
+                }
+
+                // Draw viewport rectangle
+                this.ctx.strokeStyle = '#ffd700';
+                this.ctx.lineWidth = 1;
+                this.ctx.strokeRect(
+                    minimapX + this.cameraX * tileW,
+                    minimapY + this.cameraY * tileH,
+                    VIEWPORT_WIDTH * tileW,
+                    VIEWPORT_HEIGHT * tileH
+                );
             }
 
             gameLoop() {
@@ -1798,10 +2536,10 @@
 
                 document.getElementById('message-log').innerHTML = '';
 
-                this.initBoard();
-                this.initParty();
                 this.generateDungeon();
+                this.initParty();
                 this.initEnemies();
+                this.centerCameraOnParty();
                 this.updateFogOfWar();
                 this.updateUI();
 
