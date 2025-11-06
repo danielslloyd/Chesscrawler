@@ -839,6 +839,7 @@
                 this.cameraY = 0;
 
                 this.hoveredTile = null;
+                this.floatingTexts = []; // For XP popups
 
                 this.generateDungeon();
                 this.initParty();
@@ -1949,8 +1950,13 @@
                     const xp = target.xpValue;
                     const leveled = attacker.gainXp(xp);
                     this.addMessage(`${attacker.name} gained ${xp} XP!`);
+
+                    // Add floating XP text
+                    this.addFloatingText(`+${xp} XP`, attacker.x, attacker.y, '#ffd700');
+
                     if (leveled) {
                         this.addMessage(`${attacker.name} leveled up to ${attacker.level}!`, 'important');
+                        this.addFloatingText('LEVEL UP!', attacker.x, attacker.y, '#00ff00');
                     }
 
                     // Remove enemy
@@ -1961,6 +1967,31 @@
                 this.validMoves = [];
                 this.validAttacks = [];
                 this.updateUI();
+            }
+
+            addFloatingText(text, x, y, color) {
+                this.floatingTexts.push({
+                    text,
+                    x: x * TILE_SIZE + TILE_SIZE / 2,
+                    y: y * TILE_SIZE + TILE_SIZE / 2,
+                    opacity: 1.0,
+                    age: 0,
+                    maxAge: 60, // frames
+                    color
+                });
+            }
+
+            updateFloatingTexts() {
+                for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+                    const ft = this.floatingTexts[i];
+                    ft.age++;
+                    ft.y -= 0.5; // Float upward
+                    ft.opacity = 1.0 - (ft.age / ft.maxAge);
+
+                    if (ft.age >= ft.maxAge) {
+                        this.floatingTexts.splice(i, 1);
+                    }
+                }
             }
 
             swapPositions(char1, char2) {
@@ -2425,6 +2456,25 @@
                     }
 
                     this.ctx.fillText(char.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+
+                    // Draw HP bar above character
+                    const hpBarWidth = TILE_SIZE - 4;
+                    const hpBarHeight = 4;
+                    const hpBarX = screenX + 2;
+                    const hpBarY = screenY - 2;
+                    const hpPercent = char.hp / char.maxHp;
+
+                    // Background
+                    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    this.ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+
+                    // HP bar fill
+                    let hpColor = '#48bb78'; // Green
+                    if (hpPercent < 0.3) hpColor = '#f56565'; // Red
+                    else if (hpPercent < 0.6) hpColor = '#ecc94b'; // Yellow
+
+                    this.ctx.fillStyle = hpColor;
+                    this.ctx.fillRect(hpBarX, hpBarY, hpBarWidth * hpPercent, hpBarHeight);
                 }
 
                 // Draw enemies
@@ -2439,7 +2489,42 @@
                     const screenY = (enemy.y - this.cameraY) * TILE_SIZE;
 
                     this.ctx.fillText(enemy.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+
+                    // Draw HP bar above enemy
+                    const hpBarWidth = TILE_SIZE - 4;
+                    const hpBarHeight = 4;
+                    const hpBarX = screenX + 2;
+                    const hpBarY = screenY - 2;
+                    const hpPercent = enemy.hp / enemy.maxHp;
+
+                    // Background
+                    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    this.ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+
+                    // HP bar fill
+                    let hpColor = '#f56565'; // Red for enemies
+                    this.ctx.fillStyle = hpColor;
+                    this.ctx.fillRect(hpBarX, hpBarY, hpBarWidth * hpPercent, hpBarHeight);
                 }
+
+                // Draw floating texts
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.font = 'bold 14px Arial';
+
+                for (const ft of this.floatingTexts) {
+                    // Convert world coords to screen coords
+                    const screenX = ft.x - this.cameraX * TILE_SIZE;
+                    const screenY = ft.y - this.cameraY * TILE_SIZE;
+
+                    this.ctx.globalAlpha = ft.opacity;
+                    this.ctx.fillStyle = ft.color;
+                    this.ctx.strokeStyle = '#000';
+                    this.ctx.lineWidth = 3;
+                    this.ctx.strokeText(ft.text, screenX, screenY);
+                    this.ctx.fillText(ft.text, screenX, screenY);
+                }
+                this.ctx.globalAlpha = 1.0;
 
                 // Draw grid
                 this.ctx.strokeStyle = '#1a202c';
@@ -2519,6 +2604,7 @@
             }
 
             gameLoop() {
+                this.updateFloatingTexts();
                 this.render();
                 requestAnimationFrame(() => this.gameLoop());
             }
