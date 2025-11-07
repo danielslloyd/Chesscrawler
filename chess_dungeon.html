@@ -1877,7 +1877,6 @@
                     const ally = this.getCharacterAt(x, y);
                     const enemy = this.getEnemyAt(x, y);
                     if (enemy) return false; // Can't move to enemy tiles
-                    if (this.isPathTooFoggy(char.x, char.y, x, y, char.visibilityRange)) return false;
                     return true;
                 });
 
@@ -1886,9 +1885,7 @@
                     const attackRange = this.getMovesWithPortal(char.x, char.y, obstacles);
                     this.validAttacks = attackRange.filter(([x, y]) => {
                         const enemy = this.getEnemyAt(x, y);
-                        if (!enemy) return false;
-                        if (this.isPathTooFoggy(char.x, char.y, x, y, char.visibilityRange)) return false;
-                        return true;
+                        return enemy !== null;
                     });
                 } else {
                     const attackRange = this.getAttackRangeWithPortal(char);
