@@ -368,11 +368,6 @@
             </div>
 
             <div class="panel-section">
-                <h2>👹 Enemies</h2>
-                <div id="enemy-list"></div>
-            </div>
-
-            <div class="panel-section">
                 <h2>📜 Messages</h2>
                 <div class="message-log" id="message-log"></div>
             </div>
@@ -624,10 +619,10 @@
 
             applyClassStats() {
                 const stats = {
-                    wizard: { hp: 80, attack: 25, defense: 3, type: 'magic', range: 5, visibility: 7 },
+                    wizard: { hp: 80, attack: 25, defense: 3, type: 'ranged', range: 5, visibility: 7 },
                     warrior: { hp: 150, attack: 20, defense: 15, type: 'melee', range: 1, visibility: 4 },
                     thief: { hp: 90, attack: 15, defense: 8, type: 'melee', range: 1, visibility: 6 },
-                    healer: { hp: 100, attack: 15, defense: 5, type: 'magic', range: 4, visibility: 6 },
+                    healer: { hp: 100, attack: 15, defense: 5, type: 'ranged', range: 4, visibility: 6 },
                     assassin: { hp: 60, attack: 25, defense: 3, type: 'melee', range: 1, visibility: 8 },
                     paladin: { hp: 130, attack: 15, defense: 12, type: 'melee', range: 2, visibility: 5 }
                 };
@@ -1392,8 +1387,11 @@
                 const { x, y } = this.getTileCoords(e, this.canvas);
                 if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
 
-                // Check for character selection
+                // Check what's at the clicked location
                 const char = this.getCharacterAt(x, y);
+                const enemy = this.getEnemyAt(x, y);
+
+                // If clicking on a party member, select them
                 if (char && this.party.includes(char) && char.isAlive) {
                     this.selectCharacter(char);
                     return;
@@ -1401,61 +1399,77 @@
 
                 if (!this.selectedChar) return;
 
-                // Execute action based on mode
-                if (this.actionMode === 'move') {
+                // Contextual action based on what's at the target location
+                // 1. Enemy -> Attack
+                if (enemy) {
+                    const attackType = this.selectedChar.attackType;
+                    const isInRange = this.isTargetInRange(this.selectedChar, x, y, attackType);
+                    if (isInRange) {
+                        this.attackEnemy(this.selectedChar, enemy, attackType);
+                    } else {
+                        this.addMessage(`${enemy.name} is out of range!`);
+                    }
+                    return;
+                }
+
+                // 2. Friendly character -> Swap positions
+                if (char && char !== this.selectedChar && char.isAlive) {
                     const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
                     if (isValidMove) {
-                        this.moveCharacter(this.selectedChar, x, y);
+                        this.swapPositions(this.selectedChar, char);
+                    } else {
+                        this.addMessage(`Can't reach ${char.name}!`);
                     }
-                } else if (this.actionMode === 'melee' || this.actionMode === 'ranged') {
-                    const isValidAttack = this.validAttacks.some(([ax, ay]) => ax === x && ay === y);
-                    if (isValidAttack) {
-                        const target = this.getEnemyAt(x, y);
-                        if (target) {
-                            this.attackEnemy(this.selectedChar, target, this.actionMode);
-                        }
-                    }
-                } else if (this.actionMode === 'capture') {
-                    const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
-                    if (isValidMove) {
-                        const ally = this.getCharacterAt(x, y);
-                        if (ally && ally !== this.selectedChar) {
-                            this.swapPositions(this.selectedChar, ally);
-                        }
-                    }
-                } else if (this.actionMode === 'special') {
-                    if (this.selectedChar.hasPortalAbility) {
-                        if (!this.selectedChar.portalStart) {
-                            this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
-                            this.addMessage(`${this.selectedChar.name} set portal start!`, 'important');
-                            return;
-                        } else if (!this.selectedChar.portalEnd) {
-                            const isValid = this.validMoves.some(([mx, my]) => mx === x && my === y);
-                            if (isValid) {
-                                this.selectedChar.portalEnd = { x, y };
-                                this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
-                                this.selectedChar = null;
-                                this.validMoves = [];
-                                this.validAttacks = [];
-                                this.updateUI();
-                                return;
-                            } else {
-                                this.addMessage('Invalid portal destination!');
-                                return;
-                            }
-                        }
-                    }
+                    return;
+                }
+
+                // 3. Empty tile -> Move
+                const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                if (isValidMove) {
+                    this.moveCharacter(this.selectedChar, x, y);
+                } else {
+                    this.addMessage(`Can't move there!`);
+                }
+            }
+
+            isTargetInRange(char, targetX, targetY, attackType) {
+                if (attackType === 'melee') {
+                    // Melee: must be within movement range
+                    const obstacles = this.getObstaclesForMovement(char);
+                    const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
+                    return moves.some(([mx, my]) => mx === targetX && my === targetY);
+                } else {
+                    // Ranged: within range distance
+                    const attacks = this.getAttackRangeWithPortal(char);
+                    return attacks.some(([ax, ay]) => ax === targetX && ay === targetY);
                 }
             }
 
             handleRightClick(e) {
-                // Right-click to deselect
+                // Right-click for special abilities
                 if (!this.playerTurn) return;
+                if (!this.selectedChar) return;
 
-                this.selectedChar = null;
-                this.validMoves = [];
-                this.validAttacks = [];
-                this.updateUI();
+                const { x, y } = this.getTileCoords(e, this.canvas);
+                if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+
+                // Portal ability for wizard
+                if (this.selectedChar.hasPortalAbility) {
+                    if (!this.selectedChar.portalStart) {
+                        this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
+                        this.addMessage(`${this.selectedChar.name} set portal start!`, 'important');
+                        this.updateUI();
+                    } else if (!this.selectedChar.portalEnd) {
+                        const isValid = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                        if (isValid) {
+                            this.selectedChar.portalEnd = { x, y };
+                            this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
+                            this.selectNextCharacter();
+                        } else {
+                            this.addMessage('Invalid portal destination!');
+                        }
+                    }
+                }
             }
 
             setActionMode(mode) {
@@ -1850,51 +1864,74 @@
             updateValidActionsForMode() {
                 if (!this.selectedChar) return;
 
-                const obstacles = this.getObstacles();
+                const obstacles = this.getObstaclesForMovement(this.selectedChar);
                 const char = this.selectedChar;
 
                 this.validMoves = [];
                 this.validAttacks = [];
 
-                if (this.actionMode === 'move') {
-                    const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
-                    this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
-                } else if (this.actionMode === 'melee') {
-                    // Melee attack uses movement range
+                // Show valid movement tiles (including tiles with friendly characters for swapping)
+                const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
+                this.validMoves = moves.filter(([x, y]) => {
+                    // Allow empty tiles or friendly characters
+                    const ally = this.getCharacterAt(x, y);
+                    const enemy = this.getEnemyAt(x, y);
+                    if (enemy) return false; // Can't move to enemy tiles
+                    if (this.isPathTooFoggy(char.x, char.y, x, y, char.visibilityRange)) return false;
+                    return true;
+                });
+
+                // Show attack range based on character's attack type
+                if (char.attackType === 'melee') {
                     const attackRange = this.getMovesWithPortal(char.x, char.y, obstacles);
                     this.validAttacks = attackRange.filter(([x, y]) => {
                         const enemy = this.getEnemyAt(x, y);
-                        return enemy !== null;
+                        if (!enemy) return false;
+                        if (this.isPathTooFoggy(char.x, char.y, x, y, char.visibilityRange)) return false;
+                        return true;
                     });
-                } else if (this.actionMode === 'ranged') {
-                    // Ranged attack uses character's range stat
+                } else {
                     const attackRange = this.getAttackRangeWithPortal(char);
                     this.validAttacks = attackRange.filter(([x, y]) => {
                         const enemy = this.getEnemyAt(x, y);
                         return enemy !== null;
                     });
-                } else if (this.actionMode === 'capture') {
-                    // Capture shows valid ally positions
-                    const moves = this.getMovesWithPortal(char.x, char.y, obstacles);
-                    this.validMoves = moves.filter(([x, y]) => {
-                        const ally = this.getCharacterAt(x, y);
-                        return ally && ally !== char && ally.isAlive;
-                    });
-                } else if (this.actionMode === 'special') {
-                    // Special ability (portal for wizard)
-                    if (char.hasPortalAbility) {
-                        const moves = char.getValidMoves(obstacles);
-                        this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
-                    }
                 }
             }
 
             selectCharacter(char) {
                 this.selectedChar = char;
-                this.actionMode = 'move'; // Reset to move mode
                 this.updateValidActionsForMode();
                 this.addMessage(`Selected ${char.name} (${char.pieceType})`);
+                this.centerCameraOn(char.x, char.y);
                 this.updateUI();
+            }
+
+            selectNextCharacter() {
+                // Find next alive party member
+                let found = false;
+                let startIdx = this.selectedChar ? this.party.indexOf(this.selectedChar) : -1;
+
+                for (let i = 1; i <= this.party.length; i++) {
+                    const idx = (startIdx + i) % this.party.length;
+                    if (this.party[idx].isAlive) {
+                        this.selectCharacter(this.party[idx]);
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) {
+                    this.selectedChar = null;
+                    this.validMoves = [];
+                    this.validAttacks = [];
+                    this.updateUI();
+                }
+            }
+
+            centerCameraOn(x, y) {
+                this.cameraX = Math.max(0, Math.min(BOARD_WIDTH - VIEWPORT_WIDTH, x - Math.floor(VIEWPORT_WIDTH / 2)));
+                this.cameraY = Math.max(0, Math.min(BOARD_HEIGHT - VIEWPORT_HEIGHT, y - Math.floor(VIEWPORT_HEIGHT / 2)));
             }
 
             moveCharacter(char, x, y) {
@@ -1927,10 +1964,7 @@
                 }
 
                 this.updateFogOfWar();
-                this.selectedChar = null;
-                this.validMoves = [];
-                this.validAttacks = [];
-                this.updateUI();
+                this.selectNextCharacter();
             }
 
             attackEnemy(attacker, target, attackType = 'melee') {
@@ -1963,10 +1997,7 @@
                     this.enemies = this.enemies.filter(e => e !== target);
                 }
 
-                this.selectedChar = null;
-                this.validMoves = [];
-                this.validAttacks = [];
-                this.updateUI();
+                this.selectNextCharacter();
             }
 
             addFloatingText(text, x, y, color) {
@@ -2003,11 +2034,8 @@
                 char2.y = tempY;
 
                 this.addMessage(`${char1.name} ↔ ${char2.name} swapped positions!`, 'important');
-                this.selectedChar = null;
-                this.validMoves = [];
-                this.validAttacks = [];
                 this.updateFogOfWar();
-                this.updateUI();
+                this.selectNextCharacter();
             }
 
             swapAbilities(char1, char2) {
@@ -2221,34 +2249,6 @@
 
                     partyList.appendChild(div);
                 }
-
-                // Update enemy list
-                const enemyList = document.getElementById('enemy-list');
-                enemyList.innerHTML = '';
-
-                const livingEnemies = this.enemies.filter(e => e.isAlive);
-
-                if (livingEnemies.length === 0) {
-                    enemyList.innerHTML = '<div style="color: #48bb78;">All enemies defeated! 🎉</div>';
-                } else {
-                    for (const enemy of livingEnemies) {
-                        const div = document.createElement('div');
-                        div.className = 'enemy-info';
-
-                        const hpPercent = (enemy.hp / enemy.maxHp) * 100;
-
-                        div.innerHTML = `
-                            <div style="font-size: 18px;">${enemy.sprite} ${enemy.name}</div>
-                            <div class="stat-line">${enemy.enemyType} | ${enemy.pieceType} | Lv${enemy.level}</div>
-                            <div class="hp-bar">
-                                <div class="hp-bar-fill" style="width: ${hpPercent}%"></div>
-                            </div>
-                            <div class="stat-line">HP: ${enemy.hp}/${enemy.maxHp}</div>
-                        `;
-
-                        enemyList.appendChild(div);
-                    }
-                }
             }
 
             initSpriteLegend() {
@@ -2345,16 +2345,11 @@
                     const screenY = (this.hoveredTile.y - this.cameraY) * TILE_SIZE;
 
                     if (screenX >= 0 && screenX < CANVAS_WIDTH && screenY >= 0 && screenY < CANVAS_HEIGHT) {
-                        this.ctx.strokeStyle = '#00ff00';
-                        this.ctx.lineWidth = 3;
+                        this.ctx.fillStyle = 'rgba(255, 248, 220, 0.2)';
+                        this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                        this.ctx.strokeStyle = '#fffacd';
+                        this.ctx.lineWidth = 2;
                         this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
-                        // Draw coordinates
-                        this.ctx.fillStyle = '#00ff00';
-                        this.ctx.font = 'bold 12px Arial';
-                        this.ctx.textAlign = 'left';
-                        this.ctx.textBaseline = 'top';
-                        this.ctx.fillText(`${this.hoveredTile.x},${this.hoveredTile.y}`, screenX + 2, screenY + 2);
                     }
                 }
 
