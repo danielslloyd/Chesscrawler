@@ -1448,9 +1448,34 @@
             }
 
             handleRightClick(e) {
-                // Right-click to deselect
+                // Right-click to swap movement with ally if they are on a reachable tile
                 if (!this.playerTurn) return;
 
+                // If no character selected, just return
+                if (!this.selectedChar) return;
+
+                const rect = this.canvas.getBoundingClientRect();
+                const canvasX = e.clientX - rect.left;
+                const canvasY = e.clientY - rect.top;
+
+                const x = Math.floor((canvasX + this.cameraX * TILE_SIZE) / TILE_SIZE);
+                const y = Math.floor((canvasY + this.cameraY * TILE_SIZE) / TILE_SIZE);
+
+                // Check if there's an ally at the clicked position
+                const ally = this.getCharacterAt(x, y);
+                if (ally && ally !== this.selectedChar && ally.isAlive) {
+                    // Check if the ally is on a tile reachable by the current character
+                    const isReachable = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                    if (isReachable) {
+                        this.swapAbilities(this.selectedChar, ally);
+                        return;
+                    } else {
+                        this.addMessage(`${ally.name} is not on a reachable tile!`);
+                        return;
+                    }
+                }
+
+                // If no ally was clicked, deselect
                 this.selectedChar = null;
                 this.validMoves = [];
                 this.validAttacks = [];
