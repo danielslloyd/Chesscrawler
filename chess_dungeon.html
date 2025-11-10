@@ -1446,12 +1446,25 @@
             }
 
             handleRightClick(e) {
-                // Right-click for special abilities
+                // Right-click for special abilities and ability swaps
                 if (!this.playerTurn) return;
                 if (!this.selectedChar) return;
 
                 const { x, y } = this.getTileCoords(e, this.canvas);
                 if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+
+                // Check if there's an ally at the clicked position - swap abilities
+                const ally = this.getCharacterAt(x, y);
+                if (ally && ally !== this.selectedChar && ally.isAlive) {
+                    const isReachable = this.validMoves.some(([mx, my]) => mx === x && my === y);
+                    if (isReachable) {
+                        this.swapAbilities(this.selectedChar, ally);
+                        return;
+                    } else {
+                        this.addMessage(`${ally.name} is not on a reachable tile!`);
+                        return;
+                    }
+                }
 
                 // Portal ability for wizard
                 if (this.selectedChar.hasPortalAbility) {

@@ -172,6 +172,8 @@ class Game:
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
                     self._handle_click(event.pos)
+                elif event.button == 3:  # Right click
+                    self._handle_right_click(event.pos)
 
             elif event.type == pygame.MOUSEMOTION:
                 self._handle_mouse_motion(event.pos)
@@ -210,12 +212,40 @@ class Game:
                 self._attack_enemy(self.selected_character, target)
                 return
 
-        # Check if clicking on ally for swap
-        if self.selected_character:
-            ally = self._get_character_at(tile_x, tile_y)
-            if ally and ally in self.party and ally != self.selected_character and ally.is_alive:
+    def _handle_right_click(self, pos):
+        """Handle right mouse click for movement swap."""
+        if not self.player_turn:
+            return
+
+        # If no character selected, do nothing
+        if not self.selected_character:
+            return
+
+        mouse_x, mouse_y = pos
+
+        # Check if click is in game area
+        if mouse_x >= self.game_area_width:
+            return
+
+        # Convert to tile coordinates
+        tile_x = (mouse_x + self.camera_x) // self.tile_size
+        tile_y = (mouse_y + self.camera_y) // self.tile_size
+
+        # Check if right-clicking on an ally
+        ally = self._get_character_at(tile_x, tile_y)
+        if ally and ally in self.party and ally != self.selected_character and ally.is_alive:
+            # Check if the ally is on a tile reachable by the current character
+            if (tile_x, tile_y) in self.valid_moves:
                 self._swap_abilities(self.selected_character, ally)
                 return
+            else:
+                self.add_message(f"{ally.name} is not on a reachable tile!")
+                return
+
+        # If no ally was clicked, deselect
+        self.selected_character = None
+        self.valid_moves = []
+        self.valid_attacks = []
 
     def _handle_mouse_motion(self, pos):
         """Handle mouse motion for hover effects."""
