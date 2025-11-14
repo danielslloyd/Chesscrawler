@@ -162,6 +162,10 @@ class Game:
                 elif event.key == pygame.K_SPACE:
                     if self.player_turn:
                         self._end_player_turn()
+                elif event.key == pygame.K_s:
+                    # Skip current character's turn
+                    if self.player_turn and self.selected_character:
+                        self._skip_character_turn(self.selected_character)
                 elif event.key == pygame.K_TAB:
                     self._cycle_selection()
                 elif event.key in [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]:
@@ -199,6 +203,11 @@ class Game:
             if clicked_char in self.party:
                 self._select_character(clicked_char)
                 return
+
+        # Check if character has already acted this turn
+        if self.selected_character and self.selected_character.has_acted:
+            self.add_message(f"{self.selected_character.name} has already acted this turn!")
+            return
 
         # Check if clicking on valid move
         if self.selected_character and (tile_x, tile_y) in self.valid_moves:
@@ -312,6 +321,7 @@ class Game:
         """Move character to new position."""
         old_x, old_y = character.x, character.y
         character.move(x, y)
+        character.has_acted = True
 
         # Check for loot/powerups
         tile = self.dungeon.get_tile(x, y)
@@ -325,15 +335,14 @@ class Game:
 
         self.add_message(f"{character.name} moved to ({x}, {y})")
 
-        # Deselect after move
-        self.selected_character = None
-        self.valid_moves = []
-        self.valid_attacks = []
+        # Auto-select next character who hasn't acted
+        self._select_next_available_character()
 
     def _attack_enemy(self, attacker, target):
         """Attack an enemy."""
         damage = attacker.calculate_damage()
         actual_damage = target.take_damage(damage)
+        attacker.has_acted = True
 
         self.add_message(f"{attacker.name} attacks {target.name} for {actual_damage} damage!")
 
@@ -349,24 +358,26 @@ class Game:
             elif target == self.boss:
                 self._boss_defeated()
 
-        # Deselect after attack
-        self.selected_character = None
-        self.valid_moves = []
-        self.valid_attacks = []
+        # Auto-select next character who hasn't acted
+        self._select_next_available_character()
 
     def _swap_abilities(self, char1, char2):
         """Swap chess piece abilities between two characters."""
         old_type1 = char1.piece_type
         old_type2 = char2.piece_type
 
+        # Swap immediately trades piece movement characteristics
         char1.swap_piece_type(char2)
+
+        # Swapping costs the initiator's turn
+        char1.has_acted = True
 
         self.add_message(f"{char1.name} and {char2.name} swapped movement types!")
         self.add_message(f"{char1.name}: {old_type1} -> {char1.piece_type}")
         self.add_message(f"{char2.name}: {old_type2} -> {char2.piece_type}")
 
-        # Refresh selection
-        self._select_character(char1)
+        # Auto-select next character who hasn't acted
+        self._select_next_available_character()
 
     def _collect_loot(self, character):
         """Collect loot."""
@@ -402,6 +413,33 @@ class Game:
         # Reset character turn flags
         for char in self.party:
             char.reset_turn()
+
+    def _skip_character_turn(self, character):
+        """Skip a character's turn."""
+        if character.has_acted:
+            self.add_message(f"{character.name} has already acted this turn!")
+            return
+
+        character.has_acted = True
+        self.add_message(f"{character.name} skipped their turn")
+
+        # Auto-select next character who hasn't acted
+        self._select_next_available_character()
+
+    def _select_next_available_character(self):
+        """Auto-select the next character who hasn't acted, or clear selection if all have acted."""
+        living_party = [c for c in self.party if c.is_alive]
+        available = [c for c in living_party if not c.has_acted]
+
+        if available:
+            # Select the first available character
+            self._select_character(available[0])
+        else:
+            # All characters have acted
+            self.selected_character = None
+            self.valid_moves = []
+            self.valid_attacks = []
+            self.add_message("All characters have acted. Press SPACE to end turn.")
 
     def _get_obstacles(self):
         """Get all obstacle positions (walls, characters, enemies)."""
@@ -683,9 +721,11 @@ class Game:
             if not char.is_alive:
                 continue
 
-            # Character name and class
-            name_text = f"{i+1}. {char.name} ({char.piece_type[:3].upper()})"
-            name = self.font_small.render(name_text, True, char.get_color())
+            # Character name and class with action status
+            status_indicator = "✓" if char.has_acted else "○"
+            name_text = f"{i+1}. {status_indicator} {char.name} ({char.piece_type[:3].upper()})"
+            name_color = (100, 100, 100) if char.has_acted else char.get_color()
+            name = self.font_small.render(name_text, True, name_color)
             self.screen.blit(name, (panel_x + 15, y_offset))
             y_offset += 20
 
@@ -743,6 +783,7 @@ class Game:
         controls = [
             "Click: Select/Move/Attack",
             "Tab: Cycle characters",
+            "S: Skip character turn",
             "Space: End turn",
             "ESC: Quit"
         ]
