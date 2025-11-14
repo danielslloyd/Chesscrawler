@@ -214,17 +214,17 @@ def spawn_enemies(dungeon_level, num_enemies):
     """Spawn random enemies appropriate for dungeon level."""
     enemies = []
 
+    # Most enemies are now spiders with king-style movement for puzzle gameplay
     enemy_pool = [
-        ('goblin', 'knight', 0.4),
-        ('goblin_archer', 'rook', 0.25),
-        ('goblin_shaman', 'bishop', 0.15),
-        ('spider', 'knight', 0.3),
-        ('giant_spider', 'rook', 0.15),
+        ('spider', 'king', 0.6),  # Most common - basic spider
+        ('giant_spider', 'king', 0.25),  # Tougher spider
+        ('goblin', 'knight', 0.1),  # Occasional goblin for variety
+        ('goblin_archer', 'rook', 0.05),
     ]
 
     # Add tougher enemies at higher levels
     if dungeon_level >= 3:
-        enemy_pool.append(('spider_queen', 'queen', 0.1))
+        enemy_pool.append(('spider_queen', 'king', 0.15))
 
     for i in range(num_enemies):
         # Weighted random selection

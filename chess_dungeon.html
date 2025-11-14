@@ -1552,36 +1552,41 @@
 
                 // Handle different piece types with portal traversal
                 if (pieceType === 'knight') {
-                    // Knight: atomic jumps, if landing on portal, continue from other side
+                    // Knight: atomic jumps, only expand through portal if STARTING on one
                     const offsets = [
                         [2, 1], [2, -1], [-2, 1], [-2, -1],
                         [1, 2], [1, -2], [-1, 2], [-1, -2]
                     ];
 
-                    const processKnightMoves = (fromX, fromY, depth = 0) => {
-                        if (depth > 2) return; // Limit recursion
+                    // Add knight moves from base position
+                    for (const [dx, dy] of offsets) {
+                        const nx = baseX + dx;
+                        const ny = baseY + dy;
 
+                        if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                            const key = `${nx},${ny}`;
+                            if (!visited.has(key)) {
+                                addMove(nx, ny);
+                            }
+                        }
+                    }
+
+                    // Check if starting position is on a portal
+                    const startPortalLink = findPortalLink(baseX, baseY);
+                    if (startPortalLink) {
+                        // Add knight moves from the other end of the portal
                         for (const [dx, dy] of offsets) {
-                            const nx = fromX + dx;
-                            const ny = fromY + dy;
+                            const nx = startPortalLink.x + dx;
+                            const ny = startPortalLink.y + dy;
 
                             if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
                                 const key = `${nx},${ny}`;
                                 if (!visited.has(key)) {
                                     addMove(nx, ny);
-
-                                    // Check if landed on a portal
-                                    const portalLink = findPortalLink(nx, ny);
-                                    if (portalLink && depth < 2) {
-                                        // Continue knight moves from the other portal
-                                        processKnightMoves(portalLink.x, portalLink.y, depth + 1);
-                                    }
                                 }
                             }
                         }
-                    };
-
-                    processKnightMoves(baseX, baseY);
+                    }
 
                 } else if (pieceType === 'rook' || pieceType === 'bishop' || pieceType === 'queen') {
                     // Sliding pieces: trace paths, if hit portal, continue from other side
@@ -1623,7 +1628,8 @@
                     }
 
                 } else if (pieceType === 'king') {
-                    // King: adjacent moves, if move to portal, add moves from other side
+                    // King: adjacent moves, only expand through portal if STARTING on one
+                    // First, add regular king moves from base position
                     for (let dx = -1; dx <= 1; dx++) {
                         for (let dy = -1; dy <= 1; dy++) {
                             if (dx === 0 && dy === 0) continue;
@@ -1634,25 +1640,25 @@
                                 const key = `${nx},${ny}`;
                                 if (!obstacles.has(key)) {
                                     addMove(nx, ny);
+                                }
+                            }
+                        }
+                    }
 
-                                    // Check if moved to a portal
-                                    const portalLink = findPortalLink(nx, ny);
-                                    if (portalLink) {
-                                        // Add king moves from the other portal
-                                        for (let dx2 = -1; dx2 <= 1; dx2++) {
-                                            for (let dy2 = -1; dy2 <= 1; dy2++) {
-                                                if (dx2 === 0 && dy2 === 0) continue;
-                                                const nx2 = portalLink.x + dx2;
-                                                const ny2 = portalLink.y + dy2;
+                    // Check if starting position is on a portal
+                    const startPortalLink = findPortalLink(baseX, baseY);
+                    if (startPortalLink) {
+                        // Add king moves from the other end of the portal
+                        for (let dx = -1; dx <= 1; dx++) {
+                            for (let dy = -1; dy <= 1; dy++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const nx = startPortalLink.x + dx;
+                                const ny = startPortalLink.y + dy;
 
-                                                if (nx2 >= 0 && nx2 < BOARD_WIDTH && ny2 >= 0 && ny2 < BOARD_HEIGHT) {
-                                                    const key2 = `${nx2},${ny2}`;
-                                                    if (!obstacles.has(key2)) {
-                                                        addMove(nx2, ny2);
-                                                    }
-                                                }
-                                            }
-                                        }
+                                if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                    const key = `${nx},${ny}`;
+                                    if (!obstacles.has(key)) {
+                                        addMove(nx, ny);
                                     }
                                 }
                             }
@@ -1727,28 +1733,35 @@
                             [1, 2], [1, -2], [-1, 2], [-1, -2]
                         ];
 
-                        const processKnightAttacks = (fromX, fromY, depth = 0) => {
-                            if (depth > 2) return;
+                        // Add knight attacks from character position
+                        for (const [dx, dy] of offsets) {
+                            const nx = char.x + dx;
+                            const ny = char.y + dy;
 
+                            if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                const key = `${nx},${ny}`;
+                                if (!visited.has(key)) {
+                                    addAttack(nx, ny);
+                                }
+                            }
+                        }
+
+                        // Check if starting position is on a portal
+                        const startPortalLink = findPortalLink(char.x, char.y);
+                        if (startPortalLink) {
+                            // Add knight attacks from the other end of the portal
                             for (const [dx, dy] of offsets) {
-                                const nx = fromX + dx;
-                                const ny = fromY + dy;
+                                const nx = startPortalLink.x + dx;
+                                const ny = startPortalLink.y + dy;
 
                                 if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
                                     const key = `${nx},${ny}`;
                                     if (!visited.has(key)) {
                                         addAttack(nx, ny);
-
-                                        const portalLink = findPortalLink(nx, ny);
-                                        if (portalLink && depth < 2) {
-                                            processKnightAttacks(portalLink.x, portalLink.y, depth + 1);
-                                        }
                                     }
                                 }
                             }
-                        };
-
-                        processKnightAttacks(char.x, char.y);
+                        }
 
                     } else if (pieceType === 'rook' || pieceType === 'bishop' || pieceType === 'queen') {
                         const directions = pieceType === 'rook' ? [[0, 1], [0, -1], [1, 0], [-1, 0]] :
@@ -1785,6 +1798,7 @@
                         }
 
                     } else if (pieceType === 'king') {
+                        // Add king attacks from character position
                         for (let dx = -1; dx <= 1; dx++) {
                             for (let dy = -1; dy <= 1; dy++) {
                                 if (dx === 0 && dy === 0) continue;
@@ -1793,20 +1807,22 @@
 
                                 if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
                                     addAttack(nx, ny);
+                                }
+                            }
+                        }
 
-                                    const portalLink = findPortalLink(nx, ny);
-                                    if (portalLink) {
-                                        for (let dx2 = -1; dx2 <= 1; dx2++) {
-                                            for (let dy2 = -1; dy2 <= 1; dy2++) {
-                                                if (dx2 === 0 && dy2 === 0) continue;
-                                                const nx2 = portalLink.x + dx2;
-                                                const ny2 = portalLink.y + dy2;
+                        // Check if starting position is on a portal
+                        const startPortalLink = findPortalLink(char.x, char.y);
+                        if (startPortalLink) {
+                            // Add king attacks from the other end of the portal
+                            for (let dx = -1; dx <= 1; dx++) {
+                                for (let dy = -1; dy <= 1; dy++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    const nx = startPortalLink.x + dx;
+                                    const ny = startPortalLink.y + dy;
 
-                                                if (nx2 >= 0 && nx2 < BOARD_WIDTH && ny2 >= 0 && ny2 < BOARD_HEIGHT) {
-                                                    addAttack(nx2, ny2);
-                                                }
-                                            }
-                                        }
+                                    if (nx >= 0 && nx < BOARD_WIDTH && ny >= 0 && ny < BOARD_HEIGHT) {
+                                        addAttack(nx, ny);
                                     }
                                 }
                             }

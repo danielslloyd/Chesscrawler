@@ -38,6 +38,7 @@ class Character:
         # Movement
         self.has_moved = False
         self.is_first_move = True
+        self.has_acted = False  # For turn-based system
 
         # Apply class-specific stats
         self._apply_class_stats()
@@ -198,6 +199,7 @@ class Character:
     def reset_turn(self):
         """Reset turn-based flags."""
         self.has_moved = False
+        self.has_acted = False
 
     def get_color(self):
         """Get character color based on class."""
