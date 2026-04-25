@@ -357,8 +357,10 @@
                 <h2>🎮 Controls</h2>
                 <div class="controls">
                     <button id="end-turn-btn" onclick="game.endPlayerTurn()">End Turn <span class="key-indicator">SPACE</span></button>
-                    <button onclick="game.showLevelEditor()">Level Editor <span class="key-indicator">E</span></button>
+                    <button onclick="game.showLevelEditor()">Editor <span class="key-indicator">E</span></button>
                     <button onclick="game.restart()">Restart <span class="key-indicator">R</span></button>
+                    <button onclick="game.exportLevelJSON()">📤 Export</button>
+                    <button onclick="game.importLevelJSON()">📥 Import</button>
                 </div>
             </div>
 
@@ -391,8 +393,9 @@
             <div class="editor-tools" id="editor-tools"></div>
 
             <div class="controls">
-                <button onclick="game.saveLevel()">💾 Save Level</button>
-                <button onclick="game.loadLevel()">📂 Load Level</button>
+                <button onclick="game.exportLevelJSON()">📤 Export JSON</button>
+                <button onclick="game.importLevelJSON()">📥 Import JSON</button>
+                <button onclick="game.autosaveToLocalStorage(); alert('Saved to browser storage.')">💾 Save (browser)</button>
                 <button onclick="game.clearLevel()">🗑️ Clear Level</button>
                 <button onclick="game.hideLevelEditor()">✅ Done</button>
             </div>
@@ -432,6 +435,7 @@
             WALL: '🧱',
             DOOR: '🚪',
             LOCKED_DOOR: '🔒',
+            STAIRS: '⬇️',
 
             // Items
             KEY: '🔑',
@@ -464,7 +468,64 @@
             LOCKED_DOOR: 3,
             LOOT: 4,
             POWERUP: 5,
-            KEY: 6
+            KEY: 6,
+            STAIRS: 7
+        };
+
+        // ============================================================================
+        // SPRITE LOADER — external PNGs from assets/, fallback to emoji glyphs
+        // ============================================================================
+
+        const ASSET_NAMES = [
+            'floor', 'floor_alt', 'wall', 'door', 'locked_door', 'stairs',
+            'key', 'loot', 'powerup', 'portal', 'spawn',
+            'wizard', 'warrior', 'thief', 'healer', 'assassin', 'paladin',
+            'goblin', 'spider', 'boss'
+        ];
+
+        const SpriteLoader = {
+            images: {},      // name -> HTMLImageElement (only set if successfully loaded)
+            loaded: false,
+            loadPromise: null,
+
+            loadAll() {
+                if (this.loadPromise) return this.loadPromise;
+                const promises = ASSET_NAMES.map(name => new Promise(resolve => {
+                    const img = new Image();
+                    img.onload = () => { this.images[name] = img; resolve(); };
+                    img.onerror = () => resolve(); // missing assets are OK — we fall back
+                    img.src = `assets/${name}.png`;
+                }));
+                this.loadPromise = Promise.all(promises).then(() => { this.loaded = true; });
+                return this.loadPromise;
+            },
+
+            // Draw a sprite into a canvas tile, falling back to emoji glyph if missing.
+            draw(ctx, name, x, y, fallbackGlyph) {
+                const img = this.images[name];
+                if (img) {
+                    ctx.drawImage(img, x, y, TILE_SIZE, TILE_SIZE);
+                } else if (fallbackGlyph) {
+                    ctx.font = '24px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(fallbackGlyph, x + TILE_SIZE / 2, y + TILE_SIZE / 2);
+                }
+            }
+        };
+
+        // Map enemy/character/tile -> sprite asset name
+        const SPRITE_MAP = {
+            // tiles
+            FLOOR: 'floor', FLOOR_ALT: 'floor_alt', WALL: 'wall', DOOR: 'door',
+            LOCKED_DOOR: 'locked_door', STAIRS: 'stairs',
+            KEY: 'key', LOOT: 'loot', POWERUP: 'powerup', PORTAL: 'portal',
+            // characters
+            wizard: 'wizard', warrior: 'warrior', thief: 'thief',
+            healer: 'healer', assassin: 'assassin', paladin: 'paladin',
+            // enemies
+            goblin: 'goblin', spider: 'spider', boss: 'boss'
         };
 
         // ============================================================================
@@ -831,23 +892,37 @@
                 this.hasKey = false;
                 this.keyPosition = null;
                 this.lockedDoorPosition = null;
+                this.stairsPosition = null;
+                this.levelStyle = 'rooms';
 
                 this.editorMode = false;
                 this.editorTool = TILE_TYPES.WALL;
+                this.editorPartyClass = 'wizard';
+                this.editorPartyPiece = 'bishop';
+                this.editorEnemyType = 'goblin';
+                this.editorEnemyPiece = 'knight';
 
                 this.cameraX = 0;
                 this.cameraY = 0;
 
                 this.hoveredTile = null;
 
-                this.generateDungeon();
-                this.initParty();
-                this.initEnemies();
+                // Try to resume from autosave; otherwise generate a fresh level.
+                const resumed = this.loadFromLocalStorage();
+                if (!resumed) {
+                    this.generateDungeon();
+                    this.initParty();
+                    this.initEnemies();
+                }
                 this.centerCameraOnParty();
                 this.updateFogOfWar();
                 this.setupEventListeners();
                 this.updateUI();
                 this.initSpriteLegend();
+
+                // Kick off rendering after sprites finish loading; render falls back
+                // to glyphs immediately, so this just upgrades visuals when assets arrive.
+                SpriteLoader.loadAll().then(() => this.render());
                 this.gameLoop();
             }
 
@@ -928,6 +1003,10 @@
             generateDungeon() {
                 this.initBoard();
 
+                // Pick a style per level for variety: rooms / arena / caves
+                const styles = ['rooms', 'arena', 'caves'];
+                this.levelStyle = styles[Math.floor(Math.random() * styles.length)];
+
                 // Fill entire map with walls initially
                 for (let y = 0; y < BOARD_HEIGHT; y++) {
                     for (let x = 0; x < BOARD_WIDTH; x++) {
@@ -935,7 +1014,29 @@
                     }
                 }
 
-                // Generate rooms using BSP
+                let rooms;
+                if (this.levelStyle === 'rooms') {
+                    rooms = this.generateRoomsAndCorridors();
+                } else if (this.levelStyle === 'arena') {
+                    rooms = this.generateArena();
+                } else {
+                    rooms = this.generateCaves();
+                }
+
+                // Place locked door in a strategic corridor
+                this.placeLockedDoor();
+
+                // Place key in a far room
+                this.placeKey(rooms);
+
+                // Place stairs (level exit) far from party spawn
+                this.placeStairs(rooms);
+
+                // Place loot randomly
+                this.placeLoot(5, rooms);
+            }
+
+            generateRoomsAndCorridors() {
                 const rooms = this.generateRoomsBSP();
 
                 // Carve rooms
@@ -951,31 +1052,149 @@
 
                 // Connect rooms with irregular corridors
                 for (let i = 0; i < rooms.length - 1; i++) {
-                    const room1 = rooms[i];
-                    const room2 = rooms[i + 1];
-                    this.createIrregularCorridor(room1, room2);
+                    this.createIrregularCorridor(rooms[i], rooms[i + 1]);
                 }
 
                 // Add some extra connections for loops
                 for (let i = 0; i < Math.floor(rooms.length / 3); i++) {
                     const r1 = rooms[Math.floor(Math.random() * rooms.length)];
                     const r2 = rooms[Math.floor(Math.random() * rooms.length)];
-                    if (r1 !== r2) {
-                        this.createIrregularCorridor(r1, r2);
+                    if (r1 !== r2) this.createIrregularCorridor(r1, r2);
+                }
+
+                this.smoothDungeon(1);
+                return rooms;
+            }
+
+            generateArena() {
+                // Open arena with scattered cover walls and pillar clumps.
+                // Carve a big open area, then sprinkle obstacles.
+                const margin = 2;
+                for (let y = margin; y < BOARD_HEIGHT - margin; y++) {
+                    for (let x = margin; x < BOARD_WIDTH - margin; x++) {
+                        this.board[y][x].type = TILE_TYPES.FLOOR;
                     }
                 }
 
-                // Apply cellular automata to make corridors more organic
-                this.smoothDungeon(2);
+                // Scatter cover: small clumps of walls (1-3 tiles)
+                const coverCount = 35 + Math.floor(Math.random() * 25);
+                for (let i = 0; i < coverCount; i++) {
+                    const cx = margin + 2 + Math.floor(Math.random() * (BOARD_WIDTH - margin * 2 - 4));
+                    const cy = margin + 2 + Math.floor(Math.random() * (BOARD_HEIGHT - margin * 2 - 4));
+                    const clumpSize = 1 + Math.floor(Math.random() * 3);
+                    for (let j = 0; j < clumpSize; j++) {
+                        const ox = cx + Math.floor(Math.random() * 3) - 1;
+                        const oy = cy + Math.floor(Math.random() * 3) - 1;
+                        if (ox > margin && ox < BOARD_WIDTH - margin &&
+                            oy > margin && oy < BOARD_HEIGHT - margin) {
+                            this.board[oy][ox].type = TILE_TYPES.WALL;
+                        }
+                    }
+                }
 
-                // Place locked door in a strategic corridor
-                this.placeLockedDoor();
+                // Return a few synthetic "rooms" (arena quadrants) so loot/key placement works
+                const w = Math.floor(BOARD_WIDTH / 2);
+                const h = Math.floor(BOARD_HEIGHT / 2);
+                return [
+                    { x: margin + 2, y: margin + 2, w: w - margin - 4, h: h - margin - 4,
+                      centerX: Math.floor(w / 2), centerY: Math.floor(h / 2) },
+                    { x: w + 2, y: margin + 2, w: w - 4, h: h - margin - 4,
+                      centerX: w + Math.floor(w / 2), centerY: Math.floor(h / 2) },
+                    { x: margin + 2, y: h + 2, w: w - margin - 4, h: h - 4,
+                      centerX: Math.floor(w / 2), centerY: h + Math.floor(h / 2) },
+                    { x: w + 2, y: h + 2, w: w - 4, h: h - 4,
+                      centerX: w + Math.floor(w / 2), centerY: h + Math.floor(h / 2) }
+                ];
+            }
 
-                // Place key in a far room
-                this.placeKey(rooms);
+            generateCaves() {
+                // Cellular-automata cave generation.
+                // Start with random noise, then smooth several times.
+                const fillProb = 0.45;
+                for (let y = 1; y < BOARD_HEIGHT - 1; y++) {
+                    for (let x = 1; x < BOARD_WIDTH - 1; x++) {
+                        this.board[y][x].type = Math.random() < fillProb ? TILE_TYPES.WALL : TILE_TYPES.FLOOR;
+                    }
+                }
 
-                // Place loot randomly
-                this.placeLoot(5, rooms);
+                this.smoothDungeon(5);
+
+                // Find the largest connected floor region; turn the rest into walls
+                // so the level is fully traversable.
+                const region = this.largestFloorRegion();
+                const keep = new Set(region.map(([x, y]) => `${x},${y}`));
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR && !keep.has(`${x},${y}`)) {
+                            this.board[y][x].type = TILE_TYPES.WALL;
+                        }
+                    }
+                }
+
+                // Treat 6 evenly-spaced cells of the connected region as "rooms" for placement
+                const rooms = [];
+                if (region.length > 0) {
+                    const step = Math.max(1, Math.floor(region.length / 6));
+                    for (let i = 0; i < region.length; i += step) {
+                        const [cx, cy] = region[i];
+                        rooms.push({ x: cx - 1, y: cy - 1, w: 3, h: 3, centerX: cx, centerY: cy });
+                        if (rooms.length >= 6) break;
+                    }
+                }
+                return rooms;
+            }
+
+            largestFloorRegion() {
+                const visited = new Array(BOARD_HEIGHT).fill(null).map(() => new Array(BOARD_WIDTH).fill(false));
+                let best = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    for (let x = 0; x < BOARD_WIDTH; x++) {
+                        if (visited[y][x] || this.board[y][x].type !== TILE_TYPES.FLOOR) continue;
+                        // BFS flood fill
+                        const region = [];
+                        const stack = [[x, y]];
+                        visited[y][x] = true;
+                        while (stack.length) {
+                            const [cx, cy] = stack.pop();
+                            region.push([cx, cy]);
+                            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                                const nx = cx + dx, ny = cy + dy;
+                                if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT) continue;
+                                if (visited[ny][nx]) continue;
+                                if (this.board[ny][nx].type !== TILE_TYPES.FLOOR) continue;
+                                visited[ny][nx] = true;
+                                stack.push([nx, ny]);
+                            }
+                        }
+                        if (region.length > best.length) best = region;
+                    }
+                }
+                return best;
+            }
+
+            placeStairs(rooms) {
+                // Pick a floor tile far from the party spawn area (top-left ~10,10)
+                const candidates = [];
+                for (let y = 1; y < BOARD_HEIGHT - 1; y++) {
+                    for (let x = 1; x < BOARD_WIDTH - 1; x++) {
+                        if (this.board[y][x].type !== TILE_TYPES.FLOOR) continue;
+                        const dist = Math.abs(x - 10) + Math.abs(y - 10);
+                        if (dist > 30) candidates.push({ x, y, dist });
+                    }
+                }
+                if (candidates.length === 0) {
+                    // Fallback: any room center
+                    if (rooms.length > 0) {
+                        const r = rooms[rooms.length - 1];
+                        this.board[r.centerY][r.centerX].type = TILE_TYPES.STAIRS;
+                        this.stairsPosition = { x: r.centerX, y: r.centerY };
+                    }
+                    return;
+                }
+                candidates.sort((a, b) => b.dist - a.dist);
+                const pos = candidates[Math.floor(Math.random() * Math.min(20, candidates.length))];
+                this.board[pos.y][pos.x].type = TILE_TYPES.STAIRS;
+                this.stairsPosition = { x: pos.x, y: pos.y };
             }
 
             generateRoomsBSP() {
@@ -1431,6 +1650,34 @@
                         }
                     }
                 } else if (this.actionMode === 'special') {
+                    // Healer revive: pick a fallen ally within range
+                    if (this.selectedChar.charClass === 'healer') {
+                        const fallen = this.party.find(c => !c.isAlive && c.x === x && c.y === y);
+                        if (!fallen) {
+                            this.addMessage('No fallen ally there.');
+                            return;
+                        }
+                        if ((this.selectedChar.reviveCooldown || 0) > 0) {
+                            this.addMessage(`Revive on cooldown (${this.selectedChar.reviveCooldown} turns).`);
+                            return;
+                        }
+                        const dist = Math.abs(this.selectedChar.x - x) + Math.abs(this.selectedChar.y - y);
+                        if (dist > this.selectedChar.range) {
+                            this.addMessage(`${fallen.name} is out of range.`);
+                            return;
+                        }
+                        fallen.isAlive = true;
+                        fallen.hp = Math.max(1, Math.floor(fallen.maxHp * 0.5));
+                        this.selectedChar.reviveCooldown = 5;
+                        this.addMessage(`${this.selectedChar.name} revived ${fallen.name}!`, 'important');
+                        this.selectedChar = null;
+                        this.validMoves = [];
+                        this.validAttacks = [];
+                        this.updateFogOfWar();
+                        this.updateUI();
+                        return;
+                    }
+
                     if (this.selectedChar.hasPortalAbility) {
                         if (!this.selectedChar.portalStart) {
                             this.selectedChar.portalStart = { x: this.selectedChar.x, y: this.selectedChar.y };
@@ -1937,10 +2184,19 @@
                         return ally && ally !== char && ally.isAlive;
                     });
                 } else if (this.actionMode === 'special') {
-                    // Special ability (portal for wizard)
+                    // Wizard portal: show valid portal endpoints
                     if (char.hasPortalAbility) {
                         const moves = char.getValidMoves(obstacles);
                         this.validMoves = moves.filter(([x, y]) => !this.isOccupied(x, y, char));
+                    }
+                    // Healer revive: highlight fallen allies within range
+                    if (char.charClass === 'healer') {
+                        const range = char.range || 4;
+                        for (const ally of this.party) {
+                            if (ally.isAlive) continue;
+                            const dist = Math.abs(char.x - ally.x) + Math.abs(char.y - ally.y);
+                            if (dist <= range) this.validMoves.push([ally.x, ally.y]);
+                        }
                     }
                 }
             }
@@ -1987,6 +2243,65 @@
                 this.validMoves = [];
                 this.validAttacks = [];
                 this.updateUI();
+
+                // Level transition: any party member on the stairs descends.
+                if (tile.type === TILE_TYPES.STAIRS) {
+                    this.addMessage(`${char.name} descends to level ${this.dungeonLevel + 1}!`, 'important');
+                    this.nextLevel();
+                }
+            }
+
+            nextLevel() {
+                this.dungeonLevel++;
+                this.turnNumber = 1;
+                this.hasKey = false;
+                this.exploredTiles.clear();
+                this.fogOfWar = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    this.fogOfWar.push(new Array(BOARD_WIDTH).fill(true));
+                }
+                this.generateDungeon();
+                this.repositionPartyForNewLevel();
+                this.initEnemies();
+                this.centerCameraOnParty();
+                this.updateFogOfWar();
+                this.autosaveToLocalStorage();
+                this.updateUI();
+                this.addMessage(`=== Level ${this.dungeonLevel} (${this.levelStyle}) ===`, 'important');
+            }
+
+            repositionPartyForNewLevel() {
+                // Find a cluster of floor tiles for party respawn after generating new level.
+                const startTiles = [];
+                for (let y = 5; y < 25 && startTiles.length < 50; y++) {
+                    for (let x = 5; x < 25 && startTiles.length < 50; x++) {
+                        if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                            startTiles.push({ x, y });
+                        }
+                    }
+                }
+                if (startTiles.length === 0) {
+                    // Fallback: pick any floor tile
+                    for (let y = 0; y < BOARD_HEIGHT; y++) {
+                        for (let x = 0; x < BOARD_WIDTH; x++) {
+                            if (this.board[y][x].type === TILE_TYPES.FLOOR) {
+                                startTiles.push({ x, y });
+                                if (startTiles.length >= 6) break;
+                            }
+                        }
+                        if (startTiles.length >= 6) break;
+                    }
+                }
+                for (let i = 0; i < this.party.length; i++) {
+                    const tile = startTiles[Math.min(i, startTiles.length - 1)];
+                    this.party[i].x = tile.x;
+                    this.party[i].y = tile.y;
+                    // Clear any portal state from the previous level
+                    if (this.party[i].hasPortalAbility) {
+                        this.party[i].portalStart = null;
+                        this.party[i].portalEnd = null;
+                    }
+                }
             }
 
             attackEnemy(attacker, target, attackType = 'melee') {
@@ -2163,16 +2478,23 @@
                 this.playerTurn = true;
                 this.turnNumber++;
                 this.updateFogOfWar();
+
+                // Tick healer revive cooldown
+                for (const c of this.party) {
+                    if (c.reviveCooldown && c.reviveCooldown > 0) c.reviveCooldown--;
+                }
+
                 this.addMessage(`--- Turn ${this.turnNumber} ---`);
 
                 // Check win/loss conditions
                 if (this.enemies.length === 0) {
-                    this.addMessage('🎉 VICTORY! All enemies defeated!', 'important');
+                    this.addMessage('🎉 VICTORY! Find the stairs to descend.', 'important');
                 }
                 if (!this.party.some(c => c.isAlive)) {
                     this.addMessage('💀 DEFEAT! Party wiped out!', 'damage');
                 }
 
+                this.autosaveToLocalStorage();
                 this.updateUI();
             }
 
@@ -2196,7 +2518,7 @@
 
             updateUI() {
                 // Update game status
-                document.getElementById('dungeon-level').textContent = this.dungeonLevel;
+                document.getElementById('dungeon-level').textContent = `${this.dungeonLevel} (${this.levelStyle || 'rooms'})`;
                 document.getElementById('turn-number').textContent = this.turnNumber;
                 document.getElementById('turn-phase').textContent = this.playerTurn ? 'Player Turn' : 'Enemy Turn';
                 document.getElementById('turn-phase').style.color = this.playerTurn ? '#48bb78' : '#f56565';
@@ -2234,6 +2556,7 @@
                             <button class="action-button ${this.actionMode === 'ranged' ? 'active' : ''}" onclick="game.setActionMode('ranged')">Range [G]</button>
                             <button class="action-button ${this.actionMode === 'capture' ? 'active' : ''}" onclick="game.setActionMode('capture')">Swap [C]</button>
                             ${char.hasPortalAbility ? `<button class="action-button ${this.actionMode === 'special' ? 'active' : ''}" onclick="game.setActionMode('special')">Portal [S]</button>` : ''}
+                            ${char.charClass === 'healer' ? `<button class="action-button ${this.actionMode === 'special' ? 'active' : ''}" onclick="game.setActionMode('special')">Revive [S]${char.reviveCooldown ? ` (${char.reviveCooldown})` : ''}</button>` : ''}
                         </div>
                         ` : ''}
                     `;
@@ -2333,29 +2656,7 @@
                             continue;
                         }
 
-                        // Draw floor
-                        if (tile.type === TILE_TYPES.FLOOR) {
-                            this.ctx.fillStyle = (x + y) % 2 === 0 ? '#4a5568' : '#2d3748';
-                        } else {
-                            this.ctx.fillStyle = '#2d3748';
-                        }
-                        this.ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
-
-                        // Draw tile
-                        let sprite = null;
-                        if (tile.type === TILE_TYPES.WALL) sprite = SPRITES.WALL;
-                        else if (tile.type === TILE_TYPES.DOOR) sprite = SPRITES.DOOR;
-                        else if (tile.type === TILE_TYPES.LOCKED_DOOR) sprite = SPRITES.LOCKED_DOOR;
-                        else if (tile.type === TILE_TYPES.KEY) sprite = SPRITES.KEY;
-                        else if (tile.type === TILE_TYPES.LOOT) sprite = SPRITES.LOOT;
-                        else if (tile.type === TILE_TYPES.POWERUP) sprite = SPRITES.POWERUP;
-
-                        if (sprite) {
-                            this.ctx.font = '24px Arial';
-                            this.ctx.textAlign = 'center';
-                            this.ctx.textBaseline = 'middle';
-                            this.ctx.fillText(sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
-                        }
+                        this.drawTileSprite(this.ctx, tile, x, y, screenX, screenY);
 
                         // Fog overlay
                         if (!visible) {
@@ -2459,10 +2760,6 @@
                 }
 
                 // Draw characters
-                this.ctx.font = '28px Arial';
-                this.ctx.textAlign = 'center';
-                this.ctx.textBaseline = 'middle';
-
                 for (const char of this.party) {
                     if (!char.isAlive) continue;
                     if (char.x < startX || char.x >= endX || char.y < startY || char.y >= endY) continue;
@@ -2481,7 +2778,7 @@
                         this.ctx.strokeRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
                     }
 
-                    this.ctx.fillText(char.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+                    this.drawCharSprite(this.ctx, char, screenX, screenY);
                 }
 
                 // Draw enemies
@@ -2495,7 +2792,7 @@
                     const screenX = (enemy.x - this.cameraX) * TILE_SIZE;
                     const screenY = (enemy.y - this.cameraY) * TILE_SIZE;
 
-                    this.ctx.fillText(enemy.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+                    this.drawCharSprite(this.ctx, enemy, screenX, screenY);
                 }
 
                 // Draw grid
@@ -2580,7 +2877,47 @@
                 requestAnimationFrame(() => this.gameLoop());
             }
 
+            // Draw a single board tile (background + sprite). Used by both views.
+            drawTileSprite(ctx, tile, x, y, screenX, screenY) {
+                // Always draw a floor background; non-floor sprites overlay on top.
+                const altFloor = (x + y) % 2 === 0;
+                if (SpriteLoader.images.floor && SpriteLoader.images.floor_alt) {
+                    SpriteLoader.draw(ctx, altFloor ? 'floor' : 'floor_alt', screenX, screenY);
+                } else {
+                    ctx.fillStyle = altFloor ? '#4a5568' : '#2d3748';
+                    ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
+                }
+
+                let assetName = null, fallback = null;
+                if (tile.type === TILE_TYPES.WALL)            { assetName = 'wall';        fallback = SPRITES.WALL; }
+                else if (tile.type === TILE_TYPES.DOOR)        { assetName = 'door';        fallback = SPRITES.DOOR; }
+                else if (tile.type === TILE_TYPES.LOCKED_DOOR) { assetName = 'locked_door'; fallback = SPRITES.LOCKED_DOOR; }
+                else if (tile.type === TILE_TYPES.STAIRS)      { assetName = 'stairs';      fallback = SPRITES.STAIRS; }
+                else if (tile.type === TILE_TYPES.KEY)         { assetName = 'key';         fallback = SPRITES.KEY; }
+                else if (tile.type === TILE_TYPES.LOOT)        { assetName = 'loot';        fallback = SPRITES.LOOT; }
+                else if (tile.type === TILE_TYPES.POWERUP)     { assetName = 'powerup';     fallback = SPRITES.POWERUP; }
+
+                if (assetName) {
+                    SpriteLoader.draw(ctx, assetName, screenX, screenY, fallback);
+                }
+            }
+
+            // Draw a character or enemy sprite (with optional fallback emoji).
+            drawCharSprite(ctx, char, screenX, screenY) {
+                const assetName = SPRITE_MAP[char.charClass] || SPRITE_MAP[char.enemyType];
+                if (assetName && SpriteLoader.images[assetName]) {
+                    SpriteLoader.draw(ctx, assetName, screenX, screenY);
+                } else {
+                    ctx.font = '28px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText(char.sprite, screenX + TILE_SIZE / 2, screenY + TILE_SIZE / 2);
+                }
+            }
+
             restart() {
+                if (!confirm('Restart from level 1? This deletes your autosave.')) return;
                 this.dungeonLevel = 1;
                 this.turnNumber = 1;
                 this.playerTurn = true;
@@ -2591,6 +2928,8 @@
                 this.messages = [];
                 this.exploredTiles.clear();
 
+                try { localStorage.removeItem('chess_dungeon_save'); } catch (e) {}
+
                 document.getElementById('message-log').innerHTML = '';
 
                 this.generateDungeon();
@@ -2600,7 +2939,7 @@
                 this.updateFogOfWar();
                 this.updateUI();
 
-                this.addMessage('=== New Game Started ===', 'important');
+                this.addMessage(`=== New Game (${this.levelStyle}) ===`, 'important');
             }
 
             // ========================================================================
@@ -2626,6 +2965,7 @@
                     { type: TILE_TYPES.WALL, label: '🧱 Wall' },
                     { type: TILE_TYPES.DOOR, label: '🚪 Door' },
                     { type: TILE_TYPES.LOCKED_DOOR, label: '🔒 Locked' },
+                    { type: TILE_TYPES.STAIRS, label: '⬇️ Stairs' },
                     { type: TILE_TYPES.KEY, label: '🔑 Key' },
                     { type: TILE_TYPES.LOOT, label: '💰 Loot' },
                     { type: TILE_TYPES.POWERUP, label: '💎 Power' },
@@ -2634,15 +2974,64 @@
                 ];
 
                 toolsDiv.innerHTML = tools.map(tool => `
-                    <button class="tool-button ${tool.type === this.editorTool ? 'active' : ''}"
+                    <button class="tool-button ${String(tool.type) === String(this.editorTool) ? 'active' : ''}"
                             onclick="game.selectEditorTool('${tool.type}')">
                         ${tool.label}
                     </button>
                 `).join('');
+
+                // Sub-pickers shown below the main toolbar when relevant
+                this.renderEditorSubPicker();
+            }
+
+            renderEditorSubPicker() {
+                let panel = document.getElementById('editor-subpanel');
+                if (!panel) {
+                    panel = document.createElement('div');
+                    panel.id = 'editor-subpanel';
+                    panel.style.cssText = 'margin-top: 10px; padding: 10px; background: #1a202c; border-radius: 5px;';
+                    document.getElementById('editor-tools').parentNode
+                        .insertBefore(panel, document.getElementById('editor-tools').nextSibling);
+                }
+
+                if (this.editorTool === 'party') {
+                    const classes = [
+                        ['wizard', 'bishop'], ['warrior', 'rook'], ['thief', 'knight'],
+                        ['healer', 'queen'], ['assassin', 'pawn'], ['paladin', 'king']
+                    ];
+                    panel.innerHTML = `
+                        <h3>Party class to place:</h3>
+                        ${classes.map(([cls, piece]) => `
+                            <button class="action-button ${this.editorPartyClass === cls ? 'active' : ''}"
+                                onclick="game.editorPartyClass='${cls}'; game.editorPartyPiece='${piece}'; game.renderEditorSubPicker();">
+                                ${cls} (${piece})
+                            </button>
+                        `).join('')}
+                    `;
+                } else if (this.editorTool === 'enemy') {
+                    const enemies = ['goblin', 'spider', 'boss'];
+                    const pieces = ['knight', 'rook', 'bishop', 'queen', 'king', 'pawn'];
+                    panel.innerHTML = `
+                        <h3>Enemy type:</h3>
+                        ${enemies.map(t => `
+                            <button class="action-button ${this.editorEnemyType === t ? 'active' : ''}"
+                                onclick="game.editorEnemyType='${t}'; game.renderEditorSubPicker();">${t}</button>
+                        `).join('')}
+                        <h3 style="margin-top:8px;">Movement:</h3>
+                        ${pieces.map(p => `
+                            <button class="action-button ${this.editorEnemyPiece === p ? 'active' : ''}"
+                                onclick="game.editorEnemyPiece='${p}'; game.renderEditorSubPicker();">${p}</button>
+                        `).join('')}
+                    `;
+                } else {
+                    panel.innerHTML = '';
+                }
             }
 
             selectEditorTool(tool) {
-                this.editorTool = tool;
+                // Tool may be a numeric tile type (as string) or 'party'/'enemy' string.
+                const num = Number(tool);
+                this.editorTool = (!isNaN(num) && tool !== 'party' && tool !== 'enemy') ? num : tool;
                 this.initEditorTools();
             }
 
@@ -2651,15 +3040,28 @@
                 if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
 
                 if (this.editorTool === 'party') {
-                    // Place party spawn
-                    if (this.party.length < 6) {
-                        const char = this.party[0];
-                        char.x = x;
-                        char.y = y;
+                    // Place / move a party member of the chosen class.
+                    const cls = this.editorPartyClass || 'wizard';
+                    const piece = this.editorPartyPiece || 'bishop';
+                    const sprite = SPRITES[cls.toUpperCase()] || '?';
+                    // If a member of this class already exists, move them; else add (up to 6).
+                    let existing = this.party.find(c => c.charClass === cls);
+                    if (existing) {
+                        existing.x = x; existing.y = y;
+                    } else if (this.party.length < 6) {
+                        const name = cls.charAt(0).toUpperCase() + cls.slice(1);
+                        const c = new Character(name, cls, piece, sprite, x, y);
+                        if (cls === 'wizard') c.hasPortalAbility = true;
+                        this.party.push(c);
                     }
                 } else if (this.editorTool === 'enemy') {
-                    // Place enemy spawn
-                    this.enemies.push(new Enemy(`Enemy_${this.enemies.length}`, 'goblin', 'knight', SPRITES.GOBLIN, x, y, 1));
+                    const type = this.editorEnemyType || 'goblin';
+                    const piece = this.editorEnemyPiece || 'knight';
+                    const sprite = SPRITES[type.toUpperCase()] || '?';
+                    this.enemies.push(new Enemy(
+                        `${type}_${this.enemies.length}`,
+                        type, piece, sprite, x, y, this.dungeonLevel
+                    ));
                 } else {
                     this.board[y][x].type = this.editorTool;
 
@@ -2667,6 +3069,8 @@
                         this.keyPosition = { x, y };
                     } else if (this.editorTool === TILE_TYPES.LOCKED_DOOR) {
                         this.lockedDoorPosition = { x, y };
+                    } else if (this.editorTool === TILE_TYPES.STAIRS) {
+                        this.stairsPosition = { x, y };
                     }
                 }
 
@@ -2695,44 +3099,18 @@
                 for (let y = 0; y < BOARD_HEIGHT; y++) {
                     for (let x = 0; x < BOARD_WIDTH; x++) {
                         const tile = this.board[y][x];
-                        const px = x * TILE_SIZE;
-                        const py = y * TILE_SIZE;
-
-                        // Draw floor
-                        ctx.fillStyle = (x + y) % 2 === 0 ? '#4a5568' : '#2d3748';
-                        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-
-                        // Draw tile
-                        let sprite = null;
-                        if (tile.type === TILE_TYPES.WALL) sprite = SPRITES.WALL;
-                        else if (tile.type === TILE_TYPES.DOOR) sprite = SPRITES.DOOR;
-                        else if (tile.type === TILE_TYPES.LOCKED_DOOR) sprite = SPRITES.LOCKED_DOOR;
-                        else if (tile.type === TILE_TYPES.KEY) sprite = SPRITES.KEY;
-                        else if (tile.type === TILE_TYPES.LOOT) sprite = SPRITES.LOOT;
-                        else if (tile.type === TILE_TYPES.POWERUP) sprite = SPRITES.POWERUP;
-
-                        if (sprite) {
-                            ctx.font = '24px Arial';
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(sprite, px + TILE_SIZE / 2, py + TILE_SIZE / 2);
-                        }
+                        this.drawTileSprite(ctx, tile, x, y, x * TILE_SIZE, y * TILE_SIZE);
                     }
                 }
 
                 // Draw party
-                ctx.font = '28px Arial';
                 for (const char of this.party) {
-                    const px = char.x * TILE_SIZE + TILE_SIZE / 2;
-                    const py = char.y * TILE_SIZE + TILE_SIZE / 2;
-                    ctx.fillText(char.sprite, px, py);
+                    this.drawCharSprite(ctx, char, char.x * TILE_SIZE, char.y * TILE_SIZE);
                 }
 
                 // Draw enemies
                 for (const enemy of this.enemies) {
-                    const px = enemy.x * TILE_SIZE + TILE_SIZE / 2;
-                    const py = enemy.y * TILE_SIZE + TILE_SIZE / 2;
-                    ctx.fillText(enemy.sprite, px, py);
+                    this.drawCharSprite(ctx, enemy, enemy.x * TILE_SIZE, enemy.y * TILE_SIZE);
                 }
 
                 // Draw grid
@@ -2752,58 +3130,135 @@
                 }
             }
 
-            saveLevel() {
-                const data = {
-                    board: this.board,
-                    party: this.party.map(c => ({ x: c.x, y: c.y, name: c.name, charClass: c.charClass, pieceType: c.pieceType })),
-                    enemies: this.enemies.map(e => ({ x: e.x, y: e.y, type: e.enemyType, piece: e.pieceType })),
-                    keyPosition: this.keyPosition,
-                    lockedDoorPosition: this.lockedDoorPosition
-                };
+            // ---- persistence ----------------------------------------------------
+            // We support two modes:
+            //   1. localStorage autosave for quick resume between sessions
+            //   2. JSON file export/import for sharing custom levels
+            // The same shape is used for both.
 
-                const json = JSON.stringify(data);
-                const blob = new Blob([json], { type: 'application/json' });
+            serializeState() {
+                return {
+                    version: 2,
+                    dungeonLevel: this.dungeonLevel,
+                    turnNumber: this.turnNumber,
+                    levelStyle: this.levelStyle,
+                    hasKey: this.hasKey,
+                    keyPosition: this.keyPosition,
+                    lockedDoorPosition: this.lockedDoorPosition,
+                    stairsPosition: this.stairsPosition,
+                    board: this.board.map(row => row.map(t => ({ type: t.type }))),
+                    exploredTiles: Array.from(this.exploredTiles),
+                    party: this.party.map(c => ({
+                        name: c.name, charClass: c.charClass, pieceType: c.pieceType, sprite: c.sprite,
+                        x: c.x, y: c.y, hp: c.hp, maxHp: c.maxHp, attack: c.attack, defense: c.defense,
+                        level: c.level, xp: c.xp, xpToNext: c.xpToNext, isAlive: c.isAlive,
+                        hasPortalAbility: c.hasPortalAbility,
+                        portalStart: c.portalStart, portalEnd: c.portalEnd,
+                        reviveCooldown: c.reviveCooldown || 0
+                    })),
+                    enemies: this.enemies.map(e => ({
+                        name: e.name, enemyType: e.enemyType, pieceType: e.pieceType, sprite: e.sprite,
+                        x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, attack: e.attack, defense: e.defense,
+                        level: e.level, isAlive: e.isAlive
+                    }))
+                };
+            }
+
+            applyState(data) {
+                if (!data || !data.board) return false;
+                this.dungeonLevel = data.dungeonLevel || 1;
+                this.turnNumber = data.turnNumber || 1;
+                this.levelStyle = data.levelStyle || 'rooms';
+                this.hasKey = !!data.hasKey;
+                this.keyPosition = data.keyPosition || null;
+                this.lockedDoorPosition = data.lockedDoorPosition || null;
+                this.stairsPosition = data.stairsPosition || null;
+
+                this.board = data.board.map(row => row.map(t => ({ type: t.type, occupied: null })));
+
+                this.fogOfWar = [];
+                for (let y = 0; y < BOARD_HEIGHT; y++) {
+                    this.fogOfWar.push(new Array(BOARD_WIDTH).fill(true));
+                }
+                this.exploredTiles = new Set(data.exploredTiles || []);
+
+                this.party = (data.party || []).map(p => {
+                    const c = new Character(p.name, p.charClass, p.pieceType, p.sprite, p.x, p.y);
+                    c.hp = p.hp; c.maxHp = p.maxHp;
+                    c.attack = p.attack; c.defense = p.defense;
+                    c.level = p.level; c.xp = p.xp; c.xpToNext = p.xpToNext;
+                    c.isAlive = p.isAlive;
+                    c.hasPortalAbility = p.hasPortalAbility;
+                    c.portalStart = p.portalStart || null;
+                    c.portalEnd = p.portalEnd || null;
+                    c.reviveCooldown = p.reviveCooldown || 0;
+                    return c;
+                });
+                this.enemies = (data.enemies || []).map(e => {
+                    const en = new Enemy(e.name, e.enemyType, e.pieceType, e.sprite, e.x, e.y, e.level);
+                    en.hp = e.hp; en.maxHp = e.maxHp;
+                    en.attack = e.attack; en.defense = e.defense;
+                    en.isAlive = e.isAlive;
+                    return en;
+                });
+                return true;
+            }
+
+            autosaveToLocalStorage() {
+                try {
+                    localStorage.setItem('chess_dungeon_save', JSON.stringify(this.serializeState()));
+                } catch (e) {
+                    // Ignore quota errors — autosave is best-effort.
+                }
+            }
+
+            loadFromLocalStorage() {
+                try {
+                    const raw = localStorage.getItem('chess_dungeon_save');
+                    if (!raw) return false;
+                    if (!confirm('Resume previous game from autosave?')) {
+                        localStorage.removeItem('chess_dungeon_save');
+                        return false;
+                    }
+                    const data = JSON.parse(raw);
+                    return this.applyState(data);
+                } catch (e) {
+                    console.warn('autosave load failed', e);
+                    return false;
+                }
+            }
+
+            // Export the *level only* (board + entity placements) for sharing.
+            exportLevelJSON() {
+                const data = this.serializeState();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'dungeon_level.json';
+                a.download = `chess_dungeon_level${this.dungeonLevel}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
-
-                alert('Level saved!');
             }
 
-            loadLevel() {
+            importLevelJSON() {
                 const input = document.createElement('input');
                 input.type = 'file';
                 input.accept = '.json';
                 input.onchange = (e) => {
                     const file = e.target.files[0];
                     const reader = new FileReader();
-                    reader.onload = (event) => {
+                    reader.onload = (ev) => {
                         try {
-                            const data = JSON.parse(event.target.result);
-                            this.board = data.board;
-                            this.keyPosition = data.keyPosition;
-                            this.lockedDoorPosition = data.lockedDoorPosition;
-
-                            // Reconstruct party
-                            this.initParty();
-                            for (let i = 0; i < data.party.length && i < this.party.length; i++) {
-                                this.party[i].x = data.party[i].x;
-                                this.party[i].y = data.party[i].y;
+                            const data = JSON.parse(ev.target.result);
+                            if (this.applyState(data)) {
+                                this.centerCameraOnParty();
+                                this.updateFogOfWar();
+                                this.updateUI();
+                                this.renderEditor();
+                                this.addMessage('Level imported.', 'important');
+                            } else {
+                                alert('Invalid level file.');
                             }
-
-                            // Reconstruct enemies
-                            this.enemies = [];
-                            for (const e of data.enemies) {
-                                this.enemies.push(new Enemy(`${e.type}_${this.enemies.length}`, e.type, e.piece,
-                                    e.type === 'boss' ? SPRITES.BOSS : (e.type === 'goblin' ? SPRITES.GOBLIN : SPRITES.SPIDER),
-                                    e.x, e.y, 1));
-                            }
-
-                            this.renderEditor();
-                            alert('Level loaded!');
                         } catch (err) {
                             alert('Error loading level: ' + err.message);
                         }
@@ -2813,11 +3268,18 @@
                 input.click();
             }
 
+            // Old aliases kept so existing UI buttons still work.
+            saveLevel() { this.exportLevelJSON(); this.autosaveToLocalStorage(); alert('Level exported and autosaved.'); }
+            loadLevel() { this.importLevelJSON(); }
+
             clearLevel() {
                 if (confirm('Clear the entire level?')) {
                     this.initBoard();
                     this.party = [];
                     this.enemies = [];
+                    this.stairsPosition = null;
+                    this.keyPosition = null;
+                    this.lockedDoorPosition = null;
                     this.renderEditor();
                 }
             }
