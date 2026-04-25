@@ -97,6 +97,11 @@
             border-left-color: #f56565;
         }
 
+        .character-info.acted {
+            opacity: 0.6;
+            border-left-color: #718096;
+        }
+
         .hp-bar {
             height: 8px;
             background: #4a5568;
@@ -337,6 +342,45 @@
             font-size: 32px;
             margin-bottom: 20px;
         }
+
+        #assign-modal {
+            display: none;
+            min-width: 480px;
+        }
+
+        #assign-modal.active { display: block; }
+
+        #assign-modal .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1a202c;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            border-radius: 5px;
+            text-align: left;
+        }
+
+        #assign-modal .row .name {
+            flex: 1;
+            font-size: 14px;
+        }
+
+        #assign-modal select {
+            background: #2d3748;
+            color: #fff;
+            border: 1px solid #4a5568;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        #assign-modal .conflict {
+            color: #f56565;
+            font-size: 12px;
+            min-height: 16px;
+            margin: 8px 0;
+        }
     </style>
 </head>
 <body>
@@ -384,6 +428,17 @@
                 <div class="sprite-legend" id="sprite-legend"></div>
             </div>
         </div>
+    </div>
+
+    <div id="assign-modal" class="modal">
+        <h2>⚔️ Assign Pieces</h2>
+        <p style="font-size: 13px; color: #a0aec0; margin-bottom: 12px;">
+            Pick a chess piece for each party member. Each piece must be assigned to exactly one character.
+        </p>
+        <div id="assign-rows"></div>
+        <div class="conflict" id="assign-conflict"></div>
+        <button onclick="game.confirmAssignment()">Begin Level</button>
+        <button onclick="game.resetAssignmentDefaults()" style="background: #4a5568;">Reset</button>
     </div>
 
     <div id="level-editor">
@@ -676,6 +731,7 @@
                 this.visibilityRange = 5;
 
                 this.isAlive = true;
+                this.hasActed = false;
                 this.hasPortalAbility = false;
                 this.portalStart = null;
                 this.portalEnd = null;
@@ -919,6 +975,9 @@
                 this.setupEventListeners();
                 this.updateUI();
                 this.initSpriteLegend();
+
+                // Fresh game -> assign pieces before play begins.
+                if (!resumed) this.showAssignmentModal();
 
                 // Kick off rendering after sprites finish loading; render falls back
                 // to glyphs immediately, so this just upgrades visuals when assets arrive.
@@ -1627,6 +1686,12 @@
 
                 if (!this.selectedChar) return;
 
+                // Each character gets one action per round. Already-acted = blocked.
+                if (this.selectedChar.hasActed) {
+                    this.addMessage(`${this.selectedChar.name} has already acted this turn.`);
+                    return;
+                }
+
                 // Execute action based on mode
                 if (this.actionMode === 'move') {
                     const isValidMove = this.validMoves.some(([mx, my]) => mx === x && my === y);
@@ -1669,6 +1734,7 @@
                         fallen.isAlive = true;
                         fallen.hp = Math.max(1, Math.floor(fallen.maxHp * 0.5));
                         this.selectedChar.reviveCooldown = 5;
+                        this.selectedChar.hasActed = true;
                         this.addMessage(`${this.selectedChar.name} revived ${fallen.name}!`, 'important');
                         this.selectedChar = null;
                         this.validMoves = [];
@@ -1687,6 +1753,7 @@
                             const isValid = this.validMoves.some(([mx, my]) => mx === x && my === y);
                             if (isValid) {
                                 this.selectedChar.portalEnd = { x, y };
+                                this.selectedChar.hasActed = true;
                                 this.addMessage(`${this.selectedChar.name} created portal!`, 'important');
                                 this.selectedChar = null;
                                 this.validMoves = [];
@@ -2205,13 +2272,18 @@
                 this.selectedChar = char;
                 this.actionMode = 'move'; // Reset to move mode
                 this.updateValidActionsForMode();
-                this.addMessage(`Selected ${char.name} (${char.pieceType})`);
+                if (char.hasActed) {
+                    this.addMessage(`${char.name} has already acted this turn.`);
+                } else {
+                    this.addMessage(`Selected ${char.name} (${char.pieceType})`);
+                }
                 this.updateUI();
             }
 
             moveCharacter(char, x, y) {
                 char.x = x;
                 char.y = y;
+                char.hasActed = true;
 
                 // Check for pickups
                 const tile = this.board[y][x];
@@ -2268,6 +2340,62 @@
                 this.autosaveToLocalStorage();
                 this.updateUI();
                 this.addMessage(`=== Level ${this.dungeonLevel} (${this.levelStyle}) ===`, 'important');
+                // Re-show the assignment modal so the player can re-pair pieces.
+                this.showAssignmentModal();
+            }
+
+            // Modal: assign which character plays which chess piece at level start.
+            // Defaults to the current pieceType of each character (i.e., last level's
+            // assignment), so the player can keep or rearrange.
+            showAssignmentModal() {
+                this.playerTurn = false; // freeze input until they pick
+                const modal = document.getElementById('assign-modal');
+                this.renderAssignmentRows();
+                modal.classList.add('active');
+            }
+
+            renderAssignmentRows() {
+                const pieces = ['knight', 'rook', 'bishop', 'queen', 'king', 'pawn'];
+                const rows = document.getElementById('assign-rows');
+                rows.innerHTML = this.party.map((c, i) => `
+                    <div class="row">
+                        <span class="name">${c.sprite || ''} <strong>${c.name}</strong> <span style="color:#a0aec0;">(${c.charClass})</span></span>
+                        <select id="assign-${i}">
+                            ${pieces.map(p => `<option value="${p}" ${p === c.pieceType ? 'selected' : ''}>${p}</option>`).join('')}
+                        </select>
+                    </div>
+                `).join('');
+                document.getElementById('assign-conflict').textContent = '';
+            }
+
+            resetAssignmentDefaults() {
+                // Reset to canonical class→piece pairing
+                const def = { wizard:'bishop', warrior:'rook', thief:'knight',
+                              healer:'queen', assassin:'pawn', paladin:'king' };
+                for (const c of this.party) {
+                    if (def[c.charClass]) c.pieceType = def[c.charClass];
+                }
+                this.renderAssignmentRows();
+            }
+
+            confirmAssignment() {
+                const pieces = ['knight', 'rook', 'bishop', 'queen', 'king', 'pawn'];
+                const picks = this.party.map((_, i) => document.getElementById(`assign-${i}`).value);
+                // Validate bijection: each piece must be picked exactly once.
+                const used = new Set(picks);
+                if (used.size !== picks.length || picks.length !== this.party.length) {
+                    document.getElementById('assign-conflict').textContent =
+                        '⚠ Each piece must be assigned to exactly one character.';
+                    return;
+                }
+                for (let i = 0; i < this.party.length; i++) {
+                    this.party[i].pieceType = picks[i];
+                }
+                document.getElementById('assign-modal').classList.remove('active');
+                this.playerTurn = true;
+                this.autosaveToLocalStorage();
+                this.updateUI();
+                this.addMessage('Pieces assigned. Begin!', 'important');
             }
 
             repositionPartyForNewLevel() {
@@ -2305,6 +2433,7 @@
             }
 
             attackEnemy(attacker, target, attackType = 'melee') {
+                attacker.hasActed = true;
                 let damage = attacker.calculateDamage();
 
                 // Ranged attacks deal less damage
@@ -2355,9 +2484,14 @@
                 const temp = char1.pieceType;
                 char1.pieceType = char2.pieceType;
                 char2.pieceType = temp;
+                // Only the initiator spends their turn; the partner is unaffected.
+                char1.hasActed = true;
 
-                this.addMessage(`${char1.name} ↔ ${char2.name} swapped movement types!`, 'important');
-                this.selectCharacter(char1);
+                this.addMessage(`${char1.name} ↔ ${char2.name} swapped movement types! (${char1.name} ends their turn)`, 'important');
+                this.selectedChar = null;
+                this.validMoves = [];
+                this.validAttacks = [];
+                this.updateUI();
             }
 
             getObstacles() {
@@ -2479,8 +2613,9 @@
                 this.turnNumber++;
                 this.updateFogOfWar();
 
-                // Tick healer revive cooldown
+                // Reset per-character action budget for the new player turn
                 for (const c of this.party) {
+                    c.hasActed = false;
                     if (c.reviveCooldown && c.reviveCooldown > 0) c.reviveCooldown--;
                 }
 
@@ -2533,6 +2668,7 @@
                     div.className = 'character-info';
                     if (char === this.selectedChar) div.classList.add('selected');
                     if (!char.isAlive) div.classList.add('dead');
+                    else if (char.hasActed) div.classList.add('acted');
 
                     const hpPercent = (char.hp / char.maxHp) * 100;
                     const isSelected = char === this.selectedChar;
@@ -2549,7 +2685,8 @@
                         </div>
                         <div class="stat-line">HP: ${char.hp}/${char.maxHp} | XP: ${char.xp}/${char.xpToNext}</div>
                         ${char.hasPortalAbility ? '<div class="stat-line" style="color: #9333ea;">🌀 Portal Ability</div>' : ''}
-                        ${isSelected ? `
+                        ${char.hasActed && char.isAlive ? '<div class="stat-line" style="color: #a0aec0;">✓ Acted this turn</div>' : ''}
+                        ${isSelected && !char.hasActed ? `
                         <div class="action-buttons">
                             <button class="action-button ${this.actionMode === 'move' ? 'active' : ''}" onclick="game.setActionMode('move')">Move [M]</button>
                             <button class="action-button ${this.actionMode === 'melee' ? 'active' : ''}" onclick="game.setActionMode('melee')">Melee [A]</button>
@@ -2940,6 +3077,7 @@
                 this.updateUI();
 
                 this.addMessage(`=== New Game (${this.levelStyle}) ===`, 'important');
+                this.showAssignmentModal();
             }
 
             // ========================================================================
